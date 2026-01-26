@@ -134,18 +134,25 @@ def load_workflow():
         nodes = workflow.get("nodes", [])
         links = workflow.get("links", [])
         
-        # Build link map: to_node -> {slot_index: [from_node, from_slot]}
-        link_map = {}
+        # Build link map by link_id for quick lookup
+        link_by_id = {}
         for link in links:
             # Link format: [link_id, from_node, from_slot, to_node, to_slot, type]
-            to_node = str(link[3])
-            to_slot = link[4]
-            from_node = str(link[1])
-            from_slot = link[2]
-            
-            if to_node not in link_map:
-                link_map[to_node] = {}
-            link_map[to_node][to_slot] = [from_node, from_slot]
+            link_id = link[0]
+            link_by_id[link_id] = {
+                "from_node": str(link[1]),
+                "from_slot": link[2],
+                "to_node": str(link[3]),
+                "to_slot": link[4]
+            }
+        
+        # Build reverse map: to_node -> {input_name: [from_node, from_slot]}
+        to_node_links = {}
+        for link_id, link_info in link_by_id.items():
+            to_node = link_info["to_node"]
+            if to_node not in to_node_links:
+                to_node_links[to_node] = {}
+            # We'll match by input order since we don't have input name in link
         
         # Process each node
         for node in nodes:
@@ -157,36 +164,48 @@ def load_workflow():
             
             widgets_values = node.get("widgets_values", [])
             widget_idx = 0
+            input_idx = 0  # Track input order for links
             
             # Process inputs in order
             for input_field in node.get("inputs", []):
                 input_name = input_field.get("name")
                 if not input_name:
+                    input_idx += 1
                     continue
                 
                 # Check if this input has a link
                 has_link = False
                 if "link" in input_field and input_field["link"] is not None:
                     link_id = input_field["link"]
-                    # Find link in links array
-                    for link in links:
-                        if link[0] == link_id:
-                            from_node = str(link[1])
-                            from_slot = link[2]
-                            api_prompt[node_id]["inputs"][input_name] = [from_node, from_slot]
-                            has_link = True
-                            break
+                    if link_id in link_by_id:
+                        link_info = link_by_id[link_id]
+                        from_node = link_info["from_node"]
+                        from_slot = link_info["from_slot"]
+                        api_prompt[node_id]["inputs"][input_name] = [from_node, from_slot]
+                        has_link = True
+                        log(f"  Node {node_id}.{input_name} -> linked from [{from_node}, {from_slot}]")
                 
                 # If no link, check if it's a widget
-                if not has_link and "widget" in input_field:
-                    if widget_idx < len(widgets_values):
-                        value = widgets_values[widget_idx]
-                        # Handle special cases
-                        if value == "randomize":
-                            import random
-                            value = random.randint(0, 2**32 - 1)
-                        api_prompt[node_id]["inputs"][input_name] = value
-                        widget_idx += 1
+                if not has_link:
+                    if "widget" in input_field:
+                        if widget_idx < len(widgets_values):
+                            value = widgets_values[widget_idx]
+                            # Handle special cases
+                            if value == "randomize":
+                                import random
+                                value = random.randint(0, 2**32 - 1)
+                            api_prompt[node_id]["inputs"][input_name] = value
+                            widget_idx += 1
+                            log(f"  Node {node_id}.{input_name} -> widget value: {value}")
+                    # If no widget and no link, might be optional - skip it
+                
+                input_idx += 1
+        
+        log(f"Converted workflow: {len(api_prompt)} nodes")
+        # Validate: check that all nodes have class_type
+        for node_id, node_data in api_prompt.items():
+            if "class_type" not in node_data:
+                log(f"WARNING: Node {node_id} missing class_type")
         
         return api_prompt
     except Exception as e:
@@ -257,15 +276,37 @@ def update_prompt_params(api_prompt, input_data):
 def queue_prompt(prompt):
     """Queue prompt to ComfyUI"""
     try:
+        log(f"Sending prompt with {len(prompt)} nodes")
+        # Log first few nodes for debugging
+        for i, (node_id, node_data) in enumerate(list(prompt.items())[:3]):
+            log(f"  Node {node_id}: {node_data.get('class_type')} - inputs: {list(node_data.get('inputs', {}).keys())}")
+        
         response = requests.post(
             f"{COMFYUI_URL}/prompt",
             json={"prompt": prompt},
             timeout=10
         )
-        response.raise_for_status()
+        
+        if response.status_code != 200:
+            error_text = response.text
+            log(f"ComfyUI error response ({response.status_code}): {error_text[:500]}")
+            try:
+                error_json = response.json()
+                log(f"Error details: {json.dumps(error_json, indent=2)[:1000]}")
+            except:
+                pass
+            response.raise_for_status()
+        
         return response.json()
+    except requests.exceptions.HTTPError as e:
+        log(f"HTTP Error queueing prompt: {e}")
+        if hasattr(e.response, 'text'):
+            log(f"Response text: {e.response.text[:1000]}")
+        raise
     except Exception as e:
         log(f"Error queueing prompt: {e}")
+        import traceback
+        log(traceback.format_exc())
         raise
 
 
@@ -324,6 +365,11 @@ def handler(event):
     
     input_data = event.get("input", {})
     
+    # Handle simple "prompt" input (from RunPod quick start)
+    if "prompt" in input_data and "positive_prompt" not in input_data:
+        log("Converting simple 'prompt' to 'positive_prompt'")
+        input_data["positive_prompt"] = input_data.pop("prompt")
+    
     # Start ComfyUI if not running
     if not start_comfyui():
         return {
@@ -342,7 +388,16 @@ def handler(event):
     log(f"Workflow loaded with {len(api_prompt)} nodes")
     
     # Update prompt with input parameters
+    log("Updating prompt with input parameters...")
     api_prompt = update_prompt_params(api_prompt, input_data)
+    
+    # Validate prompt before sending
+    log("Validating prompt format...")
+    for node_id, node_data in api_prompt.items():
+        if "class_type" not in node_data:
+            return {"error": f"Invalid prompt: node {node_id} missing class_type"}
+        if "inputs" not in node_data:
+            api_prompt[node_id]["inputs"] = {}
     
     # Queue prompt
     try:
