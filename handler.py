@@ -29,9 +29,9 @@ def log(message):
 def start_comfyui():
     """Start ComfyUI server in background with detailed logging"""
     global comfyui_process
-    
+
     log("=== Starting ComfyUI ===")
-    
+
     # Check if already running
     try:
         response = requests.get(COMFYUI_URL, timeout=2)
@@ -40,7 +40,7 @@ def start_comfyui():
             return True
     except Exception as e:
         log(f"ComfyUI not running yet: {e}")
-    
+
     # Verify ComfyUI directory exists
     log(f"Checking ComfyUI directory: {COMFYUI_DIR}")
     if not os.path.exists(COMFYUI_DIR):
@@ -49,7 +49,7 @@ def start_comfyui():
         if os.path.exists("/workspace"):
             log(f"Workspace contents: {os.listdir('/workspace')[:10]}")
         return False
-    
+
     main_py = os.path.join(COMFYUI_DIR, "main.py")
     log(f"Checking main.py: {main_py}")
     if not os.path.exists(main_py):
@@ -57,7 +57,35 @@ def start_comfyui():
         if os.path.exists(COMFYUI_DIR):
             log(f"ComfyUI directory contents: {os.listdir(COMFYUI_DIR)[:10]}")
         return False
+
+    # Check for network volume models directory
+    network_models = "/workspace/models"
+    comfyui_models = os.path.join(COMFYUI_DIR, "models")
     
+    if os.path.exists(network_models):
+        log(f"Network volume models found at: {network_models}")
+        # Create symlink if it doesn't exist
+        if not os.path.exists(comfyui_models) or not os.path.islink(comfyui_models):
+            if os.path.exists(comfyui_models) and not os.path.islink(comfyui_models):
+                log(f"Removing existing models directory: {comfyui_models}")
+                import shutil
+                shutil.rmtree(comfyui_models)
+            log(f"Creating symlink: {comfyui_models} -> {network_models}")
+            os.symlink(network_models, comfyui_models)
+        log(f"Models directory: {comfyui_models} -> {os.readlink(comfyui_models) if os.path.islink(comfyui_models) else comfyui_models}")
+        
+        # Verify model subdirectories exist
+        for subdir in ["text_encoders", "vae", "diffusion_models", "loras"]:
+            model_path = os.path.join(network_models, subdir)
+            if os.path.exists(model_path):
+                files = [f for f in os.listdir(model_path) if f.endswith(('.safetensors', '.ckpt', '.pt', '.pth'))]
+                log(f"  {subdir}: {len(files)} model files")
+            else:
+                log(f"  WARNING: {subdir} directory not found at {model_path}")
+    else:
+        log(f"WARNING: Network volume models directory not found at {network_models}")
+        log(f"  ComfyUI will look in: {comfyui_models}")
+
     # Start ComfyUI
     log("Starting ComfyUI process...")
     try:
