@@ -218,10 +218,64 @@ def load_workflow():
                     if "widget" in input_field:
                         if widget_idx < len(widgets_values):
                             value = widgets_values[widget_idx]
+                            input_type = input_field.get("type", "")
+                            
                             # Handle special cases
                             if value == "randomize":
                                 import random
-                                value = random.randint(0, 2**32 - 1)
+                                # For steps, cap at 10000 (ComfyUI max)
+                                if input_name == "steps":
+                                    value = random.randint(1, 10000)
+                                else:
+                                    value = random.randint(0, 2**32 - 1)
+                            
+                            # Fix KSampler widget values
+                            if node_data.get("class_type") == "KSampler":
+                                if input_name == "steps":
+                                    if isinstance(value, int) and value > 10000:
+                                        log(f"  WARNING: Node {node_id}.{input_name} value {value} exceeds max 10000, capping to 10000")
+                                        value = 10000
+                                    elif isinstance(value, int) and value < 1:
+                                        log(f"  WARNING: Node {node_id}.{input_name} value {value} is less than 1, setting to 1")
+                                        value = 1
+                                elif input_name == "sampler_name" and isinstance(value, int):
+                                    # Convert index to sampler name (full list from ComfyUI)
+                                    sampler_names = [
+                                        "euler", "euler_cfg_pp", "euler_ancestral", "euler_ancestral_cfg_pp", "heun", 
+                                        "heunpp2", "exp_heun_2_x0", "exp_heun_2_x0_sde", "dpm_2", "dpm_2_ancestral",
+                                        "lms", "dpm_fast", "dpm_adaptive", "dpmpp_2s_ancestral", "dpmpp_2s_ancestral_cfg_pp", 
+                                        "dpmpp_sde", "dpmpp_sde_gpu", "dpmpp_2m", "dpmpp_2m_cfg_pp", "dpmpp_2m_sde", 
+                                        "dpmpp_2m_sde_gpu", "dpmpp_2m_sde_heun", "dpmpp_2m_sde_heun_gpu", "dpmpp_3m_sde", 
+                                        "dpmpp_3m_sde_gpu", "ddpm", "lcm", "ipndm", "ipndm_v", "deis", "res_multistep", 
+                                        "res_multistep_cfg_pp", "res_multistep_ancestral", "res_multistep_ancestral_cfg_pp",
+                                        "gradient_estimation", "gradient_estimation_cfg_pp", "er_sde", "seeds_2", "seeds_3", 
+                                        "sa_solver", "sa_solver_pece", "ddim", "uni_pc", "uni_pc_bh2"
+                                    ]
+                                    if 0 <= value < len(sampler_names):
+                                        value = sampler_names[value]
+                                        log(f"  Converted sampler_name index {widgets_values[widget_idx]} to '{value}'")
+                                    else:
+                                        log(f"  WARNING: sampler_name index {value} out of range (max {len(sampler_names)-1}), using 'euler'")
+                                        value = "euler"
+                                elif input_name == "scheduler":
+                                    # Fix invalid scheduler values
+                                    valid_schedulers = ["simple", "sgm_uniform", "karras", "exponential", "ddim_uniform", 
+                                                       "beta", "normal", "linear_quadratic", "kl_optimal"]
+                                    if value not in valid_schedulers:
+                                        log(f"  WARNING: Invalid scheduler '{value}', using 'simple'")
+                                        value = "simple"
+                                elif input_name == "denoise":
+                                    # Fix denoise - should be float, not string
+                                    if isinstance(value, str):
+                                        if value == "simple":
+                                            value = 1.0
+                                        else:
+                                            try:
+                                                value = float(value)
+                                            except:
+                                                value = 1.0
+                                        log(f"  Converted denoise '{widgets_values[widget_idx]}' to {value}")
+                            
                             api_prompt[node_id]["inputs"][input_name] = value
                             widget_idx += 1
                             log(f"  Node {node_id}.{input_name} -> widget value: {value}")
