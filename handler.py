@@ -197,11 +197,37 @@ def load_workflow():
                             api_prompt[node_id]["inputs"][input_name] = value
                             widget_idx += 1
                             log(f"  Node {node_id}.{input_name} -> widget value: {value}")
-                    # If no widget and no link, might be optional - skip it
+                        else:
+                            log(f"  WARNING: Node {node_id}.{input_name} has widget but no value in widgets_values (index {widget_idx})")
+                    else:
+                        # No widget and no link - might be optional, but log it
+                        log(f"  Node {node_id}.{input_name} -> no widget, no link (skipping - might be optional)")
                 
                 input_idx += 1
         
-        log(f"Converted workflow: {len(api_prompt)} nodes")
+        log(f"Converted workflow: {len(api_prompt)} nodes (from {len(nodes)} nodes in file)")
+        
+        # Log all node types for verification
+        node_types = [node_data.get("class_type") for node_data in api_prompt.values()]
+        log(f"Node types: {', '.join(node_types)}")
+        
+        # Check for nodes with empty inputs (might be missing required fields)
+        empty_input_nodes = []
+        for node_id, node_data in api_prompt.items():
+            inputs = node_data.get("inputs", {})
+            if len(inputs) == 0:
+                empty_input_nodes.append(f"{node_id}({node_data.get('class_type')})")
+        
+        if empty_input_nodes:
+            log(f"WARNING: Nodes with no inputs: {', '.join(empty_input_nodes)}")
+            log("  These might be missing required inputs!")
+        
+        # Log input counts per node for debugging
+        log("Input counts per node:")
+        for node_id, node_data in api_prompt.items():
+            input_count = len(node_data.get("inputs", {}))
+            log(f"  Node {node_id} ({node_data.get('class_type')}): {input_count} inputs")
+        
         # Validate: check that all nodes have class_type
         for node_id, node_data in api_prompt.items():
             if "class_type" not in node_data:
@@ -220,23 +246,37 @@ def update_prompt_params(api_prompt, input_data):
     # Update text prompts
     if "positive_prompt" in input_data:
         # Find CLIPTextEncode node for positive prompt (usually node 6)
+        found = False
         for node_id, node_data in api_prompt.items():
             if node_data.get("class_type") == "CLIPTextEncode":
-                if "text" in node_data.get("inputs", {}):
-                    api_prompt[node_id]["inputs"]["text"] = input_data["positive_prompt"]
-                    break
+                # Always set text input, even if not present
+                if "inputs" not in api_prompt[node_id]:
+                    api_prompt[node_id]["inputs"] = {}
+                api_prompt[node_id]["inputs"]["text"] = input_data["positive_prompt"]
+                log(f"Updated positive prompt in node {node_id}")
+                found = True
+                break
+        if not found:
+            log("WARNING: No CLIPTextEncode node found for positive prompt")
     
     if "negative_prompt" in input_data:
         # Find CLIPTextEncode node for negative prompt (usually node 7)
         found_positive = False
+        found_negative = False
         for node_id, node_data in api_prompt.items():
             if node_data.get("class_type") == "CLIPTextEncode":
                 if not found_positive:
                     found_positive = True
                     continue
-                if "text" in node_data.get("inputs", {}):
-                    api_prompt[node_id]["inputs"]["text"] = input_data["negative_prompt"]
-                    break
+                # Always set text input for negative prompt
+                if "inputs" not in api_prompt[node_id]:
+                    api_prompt[node_id]["inputs"] = {}
+                api_prompt[node_id]["inputs"]["text"] = input_data["negative_prompt"]
+                log(f"Updated negative prompt in node {node_id}")
+                found_negative = True
+                break
+        if not found_negative:
+            log("WARNING: No second CLIPTextEncode node found for negative prompt")
     
     # Update seed
     if "seed" in input_data:
@@ -289,12 +329,17 @@ def queue_prompt(prompt):
         
         if response.status_code != 200:
             error_text = response.text
-            log(f"ComfyUI error response ({response.status_code}): {error_text[:500]}")
+            log(f"❌ ComfyUI error response ({response.status_code}):")
+            log(f"   Response text (first 2000 chars): {error_text[:2000]}")
             try:
                 error_json = response.json()
-                log(f"Error details: {json.dumps(error_json, indent=2)[:1000]}")
-            except:
-                pass
+                log(f"   Error JSON: {json.dumps(error_json, indent=2)}")
+            except Exception as json_err:
+                log(f"   Could not parse as JSON: {json_err}")
+            # Log the prompt we tried to send (first 3 nodes for debugging)
+            log(f"   Prompt sent had {len(prompt)} nodes")
+            for node_id, node_data in list(prompt.items())[:3]:
+                log(f"     Node {node_id}: {node_data.get('class_type')} - inputs keys: {list(node_data.get('inputs', {}).keys())}")
             response.raise_for_status()
         
         return response.json()
@@ -389,7 +434,17 @@ def handler(event):
     
     # Update prompt with input parameters
     log("Updating prompt with input parameters...")
+    log(f"Input data: {json.dumps(input_data, indent=2)[:500]}")
     api_prompt = update_prompt_params(api_prompt, input_data)
+    
+    # Log which nodes were updated
+    log("Checking updated nodes...")
+    clip_nodes = [nid for nid, nd in api_prompt.items() if nd.get("class_type") == "CLIPTextEncode"]
+    log(f"Found {len(clip_nodes)} CLIPTextEncode nodes: {clip_nodes}")
+    for node_id in clip_nodes:
+        if "text" in api_prompt[node_id].get("inputs", {}):
+            text_preview = str(api_prompt[node_id]["inputs"]["text"])[:100]
+            log(f"  Node {node_id} text: {text_preview}...")
     
     # Validate prompt before sending
     log("Validating prompt format...")
@@ -399,12 +454,38 @@ def handler(event):
         if "inputs" not in node_data:
             api_prompt[node_id]["inputs"] = {}
     
+    # Save prompt to file for debugging (optional)
+    try:
+        debug_prompt = json.dumps(api_prompt, indent=2)
+        log(f"Full prompt (first 2000 chars): {debug_prompt[:2000]}")
+    except:
+        pass
+    
     # Queue prompt
     try:
         result = queue_prompt(api_prompt)
         prompt_id = result.get("prompt_id")
         log(f"Prompt queued: {prompt_id}")
+    except requests.exceptions.HTTPError as e:
+        error_msg = str(e)
+        if hasattr(e, 'response') and e.response is not None:
+            try:
+                error_detail = e.response.json()
+                error_msg = json.dumps(error_detail, indent=2)
+                log(f"ComfyUI error details: {error_msg}")
+            except:
+                error_msg = e.response.text[:1000]
+                log(f"ComfyUI error text: {error_msg}")
+        return {
+            "error": "Failed to queue prompt",
+            "details": error_msg,
+            "prompt_nodes": len(api_prompt),
+            "suggestion": "Check ComfyUI logs for validation errors. Common issues: missing required inputs, invalid node connections, or model files not found."
+        }
     except Exception as e:
+        log(f"Unexpected error: {e}")
+        import traceback
+        log(traceback.format_exc())
         return {"error": f"Failed to queue prompt: {str(e)}"}
     
     # Poll for completion (max 10 minutes)
