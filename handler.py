@@ -62,11 +62,23 @@ def start_comfyui() -> bool:
         return False
 
     # Setup models symlink from network volume
-    network_models = "/workspace/iraKim_volume/models"
+    # Try multiple possible network volume paths
+    possible_volume_paths = [
+        "/workspace/iraKim_volume/models",
+        "/workspace/models",  # Sometimes mounted directly
+        "/workspace/ira_kim_volume/models",
+    ]
+    
+    network_models = None
+    for vol_path in possible_volume_paths:
+        if os.path.exists(vol_path):
+            network_models = vol_path
+            log(f"📦 Network volume models found at: {network_models}")
+            break
+    
     comfyui_models = os.path.join(COMFYUI_DIR, "models")
 
-    if os.path.exists(network_models):
-        log(f"📦 Network volume models found at: {network_models}")
+    if network_models:
         # Create symlink if it doesn't exist
         if not os.path.exists(comfyui_models) or not os.path.islink(comfyui_models):
             if os.path.exists(comfyui_models) and not os.path.islink(comfyui_models):
@@ -74,7 +86,10 @@ def start_comfyui() -> bool:
                 import shutil
                 shutil.rmtree(comfyui_models)
             log(f"Creating symlink: {comfyui_models} -> {network_models}")
-            os.symlink(network_models, comfyui_models)
+            try:
+                os.symlink(network_models, comfyui_models)
+            except Exception as e:
+                log(f"⚠️  Failed to create symlink: {e}")
         log(f"✅ Models directory: {comfyui_models} -> {os.readlink(comfyui_models) if os.path.islink(comfyui_models) else comfyui_models}")
 
         # Verify model subdirectories
@@ -83,8 +98,14 @@ def start_comfyui() -> bool:
             if os.path.exists(model_path):
                 files = [f for f in os.listdir(model_path) if f.endswith(('.safetensors', '.ckpt', '.pt', '.pth'))]
                 log(f"  {subdir}: {len(files)} model files")
+                if len(files) == 0:
+                    log(f"    ⚠️  WARNING: No model files found in {subdir}")
+            else:
+                log(f"  ⚠️  WARNING: {subdir} directory not found at {model_path}")
     else:
-        log(f"⚠️  WARNING: Network volume models directory not found at {network_models}")
+        log(f"⚠️  WARNING: Network volume models directory not found")
+        log(f"   Checked paths: {possible_volume_paths}")
+        log(f"   ComfyUI will look in: {comfyui_models}")
 
     # Start ComfyUI
     log("Starting ComfyUI process...")
@@ -327,7 +348,8 @@ def convert_ui_workflow_to_api(workflow: Dict[str, Any]) -> Dict[str, Any]:
             if "widget" in input_field:
                 if widget_idx < len(widgets_values):
                     value = widgets_values[widget_idx]
-                    # Handle special widget types
+                    
+                    # Handle special widget types and conversions
                     if isinstance(value, str) and value == "randomize":
                         # For seed, use random; for steps, cap at 10000
                         if input_name == "seed":
@@ -335,6 +357,44 @@ def convert_ui_workflow_to_api(workflow: Dict[str, Any]) -> Dict[str, Any]:
                             value = random.randint(0, 2**32 - 1)
                         elif input_name == "steps":
                             value = 20  # Default steps
+                    
+                    # Fix KSampler widget values
+                    if node.get("type") == "KSampler":
+                        if input_name == "denoise":
+                            # Convert string "simple" to float 1.0
+                            if isinstance(value, str):
+                                if value == "simple":
+                                    value = 1.0
+                                else:
+                                    try:
+                                        value = float(value)
+                                    except:
+                                        value = 1.0
+                                log(f"  Converted denoise '{widgets_values[widget_idx]}' to {value}")
+                        elif input_name == "scheduler":
+                            # Fix invalid scheduler values
+                            valid_schedulers = ["simple", "sgm_uniform", "karras", "exponential", "ddim_uniform", 
+                                               "beta", "normal", "linear_quadratic", "kl_optimal"]
+                            if value not in valid_schedulers:
+                                log(f"  WARNING: Invalid scheduler '{value}', using 'simple'")
+                                value = "simple"
+                        elif input_name == "sampler_name":
+                            # Convert integer index to sampler name string
+                            if isinstance(value, int):
+                                sampler_names = [
+                                    "euler", "euler_ancestral", "heun", "heunpp2", "dpm_2", "dpm_2_ancestral",
+                                    "lms", "dpm_fast", "dpm_adaptive", "dpmpp_2s_ancestral", "dpmpp_sde", 
+                                    "dpmpp_sde_gpu", "dpmpp_2m", "dpmpp_2m_sde", "dpmpp_2m_sde_gpu", 
+                                    "dpmpp_2m_sde_heun", "dpmpp_2m_sde_heun_gpu", "dpmpp_3m_sde", "dpmpp_3m_sde_gpu",
+                                    "ddpm", "lcm", "ddim", "uni_pc", "uni_pc_bh2"
+                                ]
+                                if 0 <= value < len(sampler_names):
+                                    value = sampler_names[value]
+                                    log(f"  Converted sampler_name index {widgets_values[widget_idx]} to '{value}'")
+                                else:
+                                    log(f"  WARNING: sampler_name index {value} out of range, using 'euler'")
+                                    value = "euler"
+                    
                     api_prompt[node_id]["inputs"][input_name] = value
                     widget_idx += 1
                 else:
