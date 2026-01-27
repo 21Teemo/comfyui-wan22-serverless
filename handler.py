@@ -62,19 +62,51 @@ def start_comfyui() -> bool:
         return False
 
     # Setup models symlink from network volume
+    # First, check what's actually in /workspace
+    log(f"📂 Checking /workspace contents:")
+    if os.path.exists("/workspace"):
+        workspace_contents = os.listdir("/workspace")
+        log(f"   /workspace contains: {workspace_contents[:20]}")
+        
+        # Look for volume directories
+        volume_dirs = [d for d in workspace_contents if 'volume' in d.lower() or 'ira' in d.lower() or 'kim' in d.lower()]
+        if volume_dirs:
+            log(f"   Found potential volume dirs: {volume_dirs}")
+    
     # Try multiple possible network volume paths
     possible_volume_paths = [
         "/workspace/iraKim_volume/models",
-        "/workspace/models",  # Sometimes mounted directly
         "/workspace/ira_kim_volume/models",
+        "/workspace/models",  # Sometimes mounted directly
+        "/workspace/iraKim_volume",  # Maybe models is at root
+        "/workspace/ira_kim_volume",  # Maybe models is at root
     ]
+    
+    # Also check if there are any directories in /workspace that might be volumes
+    if os.path.exists("/workspace"):
+        for item in os.listdir("/workspace"):
+            item_path = os.path.join("/workspace", item)
+            if os.path.isdir(item_path) and ("volume" in item.lower() or "ira" in item.lower()):
+                # Check if it has a models subdirectory
+                models_in_item = os.path.join(item_path, "models")
+                if os.path.exists(models_in_item):
+                    possible_volume_paths.append(models_in_item)
+                # Or check if models are directly in the volume
+                possible_volume_paths.append(item_path)
     
     network_models = None
     for vol_path in possible_volume_paths:
         if os.path.exists(vol_path):
-            network_models = vol_path
-            log(f"📦 Network volume models found at: {network_models}")
-            break
+            # Check if it has model subdirectories
+            has_models = False
+            for subdir in ["text_encoders", "vae", "diffusion_models", "loras"]:
+                if os.path.exists(os.path.join(vol_path, subdir)):
+                    has_models = True
+                    break
+            if has_models or os.path.isdir(vol_path):
+                network_models = vol_path
+                log(f"📦 Network volume models found at: {network_models}")
+                break
     
     comfyui_models = os.path.join(COMFYUI_DIR, "models")
 
