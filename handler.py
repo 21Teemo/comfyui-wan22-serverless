@@ -375,12 +375,26 @@ def queue_prompt(prompt: Dict[str, Any]) -> Dict[str, Any]:
             try:
                 error_detail = e.response.json()
                 error_msg = json.dumps(error_detail, indent=2)
+                # Log full error details
+                log(f"❌ ComfyUI validation error:")
+                log(f"   {error_msg}")
+                # Try to extract node errors if present
+                if isinstance(error_detail, dict):
+                    if "error" in error_detail:
+                        error_info = error_detail["error"]
+                        if isinstance(error_info, dict) and "node_errors" in error_info:
+                            log(f"   Node errors:")
+                            for node_id, node_error in error_info["node_errors"].items():
+                                log(f"     Node {node_id}: {node_error}")
             except:
-                error_msg = e.response.text[:1000]
+                error_msg = e.response.text[:2000]
+                log(f"❌ ComfyUI error response: {error_msg}")
         log(f"❌ Error queueing prompt: {error_msg}")
         raise
     except Exception as e:
         log(f"❌ Error queueing prompt: {e}")
+        import traceback
+        log(traceback.format_exc())
         raise
 
 
