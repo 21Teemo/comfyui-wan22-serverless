@@ -1,0 +1,61 @@
+name: Sync from Official ComfyUI
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC (adjust timezone as needed)
+    - cron: '0 2 * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Required to push to repository
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch full history for proper merging
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      
+      - name: Add official ComfyUI as remote
+        run: |
+          git remote add upstream https://github.com/Comfy-Org/ComfyUI.git || git remote set-url upstream https://github.com/Comfy-Org/ComfyUI.git
+          git fetch upstream
+      
+      - name: Check for updates
+        id: check
+        run: |
+          git fetch upstream master
+          LOCAL=$(git rev-parse master)
+          REMOTE=$(git rev-parse upstream/master)
+          
+          if [ "$LOCAL" = "$REMOTE" ]; then
+            echo "up_to_date=true" >> $GITHUB_OUTPUT
+            echo "✅ Repository is up to date"
+          else
+            echo "up_to_date=false" >> $GITHUB_OUTPUT
+            echo "🔄 Updates available from official repo"
+          fi
+      
+      - name: Merge updates from official
+        if: steps.check.outputs.up_to_date == 'false'
+        run: |
+          git merge upstream/master --no-edit -m "chore: sync from official ComfyUI repository"
+      
+      - name: Push to personal repository
+        if: steps.check.outputs.up_to_date == 'false'
+        run: |
+          git push origin master
+          echo "✅ Successfully synced changes from official ComfyUI"
+      
+      - name: Skip if up to date
+        if: steps.check.outputs.up_to_date == 'true'
+        run: |
+          echo "ℹ️  No updates to sync"
