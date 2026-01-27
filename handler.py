@@ -200,10 +200,11 @@ def get_workflow_from_input(input_data: Dict[str, Any]) -> Optional[Dict[str, An
         return workflow
 
     # Try to load default workflow file
-    log(f"Checking for default workflow at: {DEFAULT_WORKFLOW_FILE}")
-    log(f"File exists: {os.path.exists(DEFAULT_WORKFLOW_FILE)}")
+    workflow_file = DEFAULT_WORKFLOW_FILE
+    log(f"Checking for default workflow at: {workflow_file}")
+    log(f"File exists: {os.path.exists(workflow_file)}")
     
-    if not os.path.exists(DEFAULT_WORKFLOW_FILE):
+    if not os.path.exists(workflow_file):
         # Try alternative paths
         alt_paths = [
             "/workspace/runpod-slim/user/default/workflows/iraKim_text_to_video_wan .json",
@@ -213,7 +214,7 @@ def get_workflow_from_input(input_data: Dict[str, Any]) -> Optional[Dict[str, An
         for alt_path in alt_paths:
             if os.path.exists(alt_path):
                 log(f"Found workflow at alternative path: {alt_path}")
-                DEFAULT_WORKFLOW_FILE = alt_path
+                workflow_file = alt_path
                 break
         else:
             log(f"❌ ERROR: Default workflow file not found at any path")
@@ -224,9 +225,9 @@ def get_workflow_from_input(input_data: Dict[str, Any]) -> Optional[Dict[str, An
                 log(f"   ComfyUI dir contents: {os.listdir(COMFYUI_DIR)[:10]}")
             return None
     
-    log(f"Loading default workflow from: {DEFAULT_WORKFLOW_FILE}")
+    log(f"Loading default workflow from: {workflow_file}")
     try:
-        with open(DEFAULT_WORKFLOW_FILE, 'r') as f:
+        with open(workflow_file, 'r') as f:
             workflow_data = json.load(f)
         
         # Convert UI workflow format to API format if needed
