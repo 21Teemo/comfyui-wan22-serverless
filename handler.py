@@ -320,6 +320,8 @@ def convert_ui_workflow_to_api(workflow: Dict[str, Any]) -> Dict[str, Any]:
                         link_info["from_slot"]
                     ]
                     continue
+                else:
+                    log(f"  WARNING: Node {node_id}.{input_name} has link {link_id} but link not found in link_by_id")
 
             # Check for widget value (only if no link)
             if "widget" in input_field:
@@ -335,9 +337,25 @@ def convert_ui_workflow_to_api(workflow: Dict[str, Any]) -> Dict[str, Any]:
                             value = 20  # Default steps
                     api_prompt[node_id]["inputs"][input_name] = value
                     widget_idx += 1
-                # If widget exists but no value, skip (might be optional)
+                else:
+                    log(f"  WARNING: Node {node_id}.{input_name} has widget but no value at index {widget_idx}")
+            
+            # If input has neither link nor widget, it might be optional
+            # But log it for debugging
+            if "link" not in input_field or input_field.get("link") is None:
+                if "widget" not in input_field:
+                    log(f"  INFO: Node {node_id}.{input_name} has no link and no widget (likely optional)")
 
     log(f"Converted workflow: {len(api_prompt)} nodes")
+    
+    # Log summary of inputs per node for debugging
+    for node_id, node_data in api_prompt.items():
+        input_count = len(node_data.get("inputs", {}))
+        class_type = node_data.get("class_type", "unknown")
+        log(f"  Node {node_id} ({class_type}): {input_count} inputs")
+        if input_count == 0:
+            log(f"    ⚠️  WARNING: Node {node_id} has no inputs!")
+    
     return api_prompt
 
 
@@ -443,12 +461,23 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
     input_images = input_data.get("images", [])
     image_map = upload_input_images(input_images)
 
+    # Log workflow structure for debugging
+    log(f"Workflow structure: {len(workflow)} nodes")
+    for node_id, node_data in list(workflow.items())[:5]:  # Log first 5 nodes
+        class_type = node_data.get("class_type", "unknown")
+        inputs = node_data.get("inputs", {})
+        log(f"  Node {node_id} ({class_type}): {len(inputs)} inputs - {list(inputs.keys())[:3]}")
+    
     # Queue prompt
     try:
         result = queue_prompt(workflow)
         prompt_id = result.get("prompt_id")
         log(f"✅ Prompt queued: {prompt_id}")
     except Exception as e:
+        # Log the workflow that failed for debugging
+        log(f"❌ Failed workflow structure:")
+        for node_id, node_data in workflow.items():
+            log(f"  Node {node_id}: {node_data.get('class_type')} - inputs: {list(node_data.get('inputs', {}).keys())}")
         return {
             "error": "Failed to queue prompt",
             "details": str(e)
