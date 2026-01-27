@@ -191,6 +191,7 @@ def upload_input_images(images: List[Dict[str, str]]) -> Dict[str, str]:
 def get_workflow_from_input(input_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Get workflow from input. If not provided, try to load default workflow.
+    Also supports simple prompt input that updates the default workflow.
     """
     # Check if workflow is provided in input
     if "workflow" in input_data:
@@ -199,26 +200,62 @@ def get_workflow_from_input(input_data: Dict[str, Any]) -> Optional[Dict[str, An
         return workflow
 
     # Try to load default workflow file
-    if os.path.exists(DEFAULT_WORKFLOW_FILE):
-        log(f"Loading default workflow from: {DEFAULT_WORKFLOW_FILE}")
-        try:
-            with open(DEFAULT_WORKFLOW_FILE, 'r') as f:
-                workflow_data = json.load(f)
-            
-            # Convert UI workflow format to API format if needed
-            if "nodes" in workflow_data:
-                # This is UI format, need to convert
-                log("Converting UI workflow format to API format...")
-                return convert_ui_workflow_to_api(workflow_data)
-            else:
-                # Already in API format
-                return workflow_data
-        except Exception as e:
-            log(f"⚠️  WARNING: Failed to load default workflow: {e}")
+    log(f"Checking for default workflow at: {DEFAULT_WORKFLOW_FILE}")
+    log(f"File exists: {os.path.exists(DEFAULT_WORKFLOW_FILE)}")
+    
+    if not os.path.exists(DEFAULT_WORKFLOW_FILE):
+        # Try alternative paths
+        alt_paths = [
+            "/workspace/runpod-slim/user/default/workflows/iraKim_text_to_video_wan .json",
+            "/workspace/ComfyUI/user/default/workflows/iraKim_text_to_video_wan .json",
+            os.path.join(COMFYUI_DIR, "user/default/workflows/iraKim_text_to_video_wan .json")
+        ]
+        for alt_path in alt_paths:
+            if os.path.exists(alt_path):
+                log(f"Found workflow at alternative path: {alt_path}")
+                DEFAULT_WORKFLOW_FILE = alt_path
+                break
+        else:
+            log(f"❌ ERROR: Default workflow file not found at any path")
+            log(f"   Checked: {DEFAULT_WORKFLOW_FILE}")
+            log(f"   Also checked: {alt_paths}")
+            log(f"   ComfyUI dir exists: {os.path.exists(COMFYUI_DIR)}")
+            if os.path.exists(COMFYUI_DIR):
+                log(f"   ComfyUI dir contents: {os.listdir(COMFYUI_DIR)[:10]}")
             return None
-
-    log("⚠️  WARNING: No workflow provided and default workflow not found")
-    return None
+    
+    log(f"Loading default workflow from: {DEFAULT_WORKFLOW_FILE}")
+    try:
+        with open(DEFAULT_WORKFLOW_FILE, 'r') as f:
+            workflow_data = json.load(f)
+        
+        # Convert UI workflow format to API format if needed
+        if "nodes" in workflow_data:
+            # This is UI format, need to convert
+            log("Converting UI workflow format to API format...")
+            api_workflow = convert_ui_workflow_to_api(workflow_data)
+            
+            # Update prompt if provided in input
+            if "prompt" in input_data:
+                prompt_text = input_data["prompt"]
+                log(f"Updating prompt in workflow: {prompt_text[:100]}...")
+                # Find CLIPTextEncode nodes and update the first one (positive prompt)
+                for node_id, node_data in api_workflow.items():
+                    if node_data.get("class_type") == "CLIPTextEncode":
+                        if "text" in node_data.get("inputs", {}):
+                            api_workflow[node_id]["inputs"]["text"] = prompt_text
+                            log(f"Updated prompt in node {node_id}")
+                            break
+            
+            return api_workflow
+        else:
+            # Already in API format
+            return workflow_data
+    except Exception as e:
+        log(f"❌ ERROR: Failed to load default workflow: {e}")
+        import traceback
+        log(traceback.format_exc())
+        return None
 
 
 def convert_ui_workflow_to_api(workflow: Dict[str, Any]) -> Dict[str, Any]:
@@ -230,16 +267,30 @@ def convert_ui_workflow_to_api(workflow: Dict[str, Any]) -> Dict[str, Any]:
     nodes = workflow.get("nodes", [])
     links = workflow.get("links", [])
 
-    # Build link map
+    # Build link map: link_id -> {from_node, from_slot, to_node, to_slot}
     link_by_id = {}
     for link in links:
-        link_id = link[0]
-        link_by_id[link_id] = {
-            "from_node": str(link[1]),
-            "from_slot": link[2],
-            "to_node": str(link[3]),
-            "to_slot": link[4]
-        }
+        if len(link) >= 5:
+            link_id = link[0]
+            link_by_id[link_id] = {
+                "from_node": str(link[1]),
+                "from_slot": link[2],
+                "to_node": str(link[3]),
+                "to_slot": link[4]
+            }
+
+    # Build reverse map: to_node -> list of inputs that have links
+    to_node_inputs = {}
+    for link_id, link_info in link_by_id.items():
+        to_node = link_info["to_node"]
+        if to_node not in to_node_inputs:
+            to_node_inputs[to_node] = []
+        to_node_inputs[to_node].append({
+            "link_id": link_id,
+            "from_node": link_info["from_node"],
+            "from_slot": link_info["from_slot"],
+            "to_slot": link_info["to_slot"]
+        })
 
     # Process each node
     for node in nodes:
@@ -252,13 +303,13 @@ def convert_ui_workflow_to_api(workflow: Dict[str, Any]) -> Dict[str, Any]:
         widgets_values = node.get("widgets_values", [])
         widget_idx = 0
 
-        # Process inputs
+        # Process inputs in order
         for input_field in node.get("inputs", []):
             input_name = input_field.get("name")
             if not input_name:
                 continue
 
-            # Check for link
+            # Check for link first
             if "link" in input_field and input_field["link"] is not None:
                 link_id = input_field["link"]
                 if link_id in link_by_id:
@@ -269,11 +320,21 @@ def convert_ui_workflow_to_api(workflow: Dict[str, Any]) -> Dict[str, Any]:
                     ]
                     continue
 
-            # Check for widget value
-            if "widget" in input_field and widget_idx < len(widgets_values):
-                value = widgets_values[widget_idx]
-                api_prompt[node_id]["inputs"][input_name] = value
-                widget_idx += 1
+            # Check for widget value (only if no link)
+            if "widget" in input_field:
+                if widget_idx < len(widgets_values):
+                    value = widgets_values[widget_idx]
+                    # Handle special widget types
+                    if isinstance(value, str) and value == "randomize":
+                        # For seed, use random; for steps, cap at 10000
+                        if input_name == "seed":
+                            import random
+                            value = random.randint(0, 2**32 - 1)
+                        elif input_name == "steps":
+                            value = 20  # Default steps
+                    api_prompt[node_id]["inputs"][input_name] = value
+                    widget_idx += 1
+                # If widget exists but no value, skip (might be optional)
 
     log(f"Converted workflow: {len(api_prompt)} nodes")
     return api_prompt

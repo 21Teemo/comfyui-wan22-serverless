@@ -36,7 +36,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir runpod
 
 # Copy workflow file (handle filename with space)
-COPY user/default/workflows/ /workspace/ComfyUI/user/default/workflows/
+# Create directory structure and copy workflow
+RUN mkdir -p /workspace/runpod-slim/user/default/workflows
+COPY user/default/workflows/ /workspace/runpod-slim/user/default/workflows/
 
 # Copy handler
 COPY handler.py /workspace/handler.py
