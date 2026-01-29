@@ -3,7 +3,7 @@ RunPod Serverless Handler for ComfyUI
 Based on official runpod-workers/worker-comfyui pattern
 Adapted for custom directory structure:
 - /workspace/runpod-slim = ComfyUI installation
-- /workspace/iraKim_volume = Network Volume (models)
+- /workspace/models = Network Volume (models)
 """
 import runpod
 import subprocess
@@ -93,7 +93,7 @@ def start_comfyui() -> bool:
     comfyui_models = os.path.join(COMFYUI_DIR, "models")
     
     if network_models:
-        # Create symlink: /workspace/runpod-slim/models -> /workspace/iraKim_volume/models
+        # Create symlink: /workspace/runpod-slim/models -> /workspace/models
         if os.path.exists(comfyui_models) and not os.path.islink(comfyui_models):
             log(f"Removing existing models directory: {comfyui_models}")
             import shutil
