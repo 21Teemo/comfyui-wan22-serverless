@@ -36,6 +36,16 @@ def log(message: str):
     sys.stderr.flush()
 
 
+def log_workflow_models(workflow: Dict[str, Any]) -> None:
+    """Log model filenames in workflow so we can compare to disk (helps debug value_not_in_list)."""
+    model_inputs = ("clip_name", "unet_name", "vae_name", "lora_name", "ckpt_name")
+    for node_id, node_data in workflow.items():
+        ct = node_data.get("class_type", "")
+        for inp_name, val in (node_data.get("inputs") or {}).items():
+            if inp_name in model_inputs and isinstance(val, str):
+                log(f"  📎 Node {node_id} ({ct}): {inp_name} = {val}")
+
+
 def start_comfyui() -> bool:
     """Start ComfyUI server in background"""
     global comfyui_process
@@ -229,16 +239,16 @@ def get_workflow_from_input(input_data: Dict[str, Any]) -> Optional[Dict[str, An
     Get workflow from input. If not provided, try to load default workflow.
     Also supports simple prompt input that updates the default workflow.
     """
-    # Check if workflow is provided in input
     if "workflow" in input_data:
         workflow = input_data["workflow"]
-        log("Using workflow from API request")
+        log("Workflow source: API request")
+        log(f"  Nodes: {len(workflow) if isinstance(workflow, dict) else 0}")
         return workflow
 
-    # Try to load default workflow file
     workflow_file = DEFAULT_WORKFLOW_FILE
-    log(f"Checking for default workflow at: {workflow_file}")
-    log(f"File exists: {os.path.exists(workflow_file)}")
+    log(f"Workflow source: default file")
+    log(f"  Path: {workflow_file}")
+    log(f"  Exists: {os.path.exists(workflow_file)}")
     
     if not os.path.exists(workflow_file):
         # Try alternative paths
@@ -261,35 +271,30 @@ def get_workflow_from_input(input_data: Dict[str, Any]) -> Optional[Dict[str, An
                 log(f"   ComfyUI dir contents: {os.listdir(COMFYUI_DIR)[:10]}")
             return None
     
-    log(f"Loading default workflow from: {workflow_file}")
     try:
         with open(workflow_file, 'r') as f:
             workflow_data = json.load(f)
-        
-        # Convert UI workflow format to API format if needed
-        if "nodes" in workflow_data:
-            # This is UI format, need to convert
-            log("Converting UI workflow format to API format...")
+        has_nodes = "nodes" in workflow_data
+        log(f"  Loaded: {len(workflow_data.get('nodes', []))} nodes, {len(workflow_data.get('links', []))} links" if has_nodes else "  Loaded (API format)")
+
+        if has_nodes:
+            log("Converting UI workflow -> API format...")
             api_workflow = convert_ui_workflow_to_api(workflow_data)
-            
-            # Update prompt if provided in input (accept "prompt" or "positive_prompt")
             prompt_text = input_data.get("prompt") or input_data.get("positive_prompt")
             if prompt_text:
-                log(f"Updating prompt in workflow: {prompt_text[:100]}...")
-                # Find CLIPTextEncode nodes and update the first one (positive prompt)
+                log(f"  Injecting prompt ({len(prompt_text)} chars) into CLIPTextEncode...")
                 for node_id, node_data in api_workflow.items():
                     if node_data.get("class_type") == "CLIPTextEncode":
                         if "text" in node_data.get("inputs", {}):
                             api_workflow[node_id]["inputs"]["text"] = prompt_text
-                            log(f"Updated prompt in node {node_id}")
+                            log(f"  Updated node {node_id}")
                             break
-            
+            else:
+                log("  No prompt/positive_prompt in input; using workflow text as-is")
             return api_workflow
-        else:
-            # Already in API format
-            return workflow_data
+        return workflow_data
     except Exception as e:
-        log(f"❌ ERROR: Failed to load default workflow: {e}")
+        log(f"❌ Failed to load workflow: {e}")
         import traceback
         log(traceback.format_exc())
         return None
@@ -300,9 +305,10 @@ def convert_ui_workflow_to_api(workflow: Dict[str, Any]) -> Dict[str, Any]:
     Convert ComfyUI UI workflow format to API format.
     This is a simplified version - for complex workflows, use Export (API) in ComfyUI.
     """
-    api_prompt = {}
     nodes = workflow.get("nodes", [])
     links = workflow.get("links", [])
+    log(f"  Converting {len(nodes)} nodes, {len(links)} links")
+    api_prompt = {}
 
     # Build link map: link_id -> {from_node, from_slot, to_node, to_slot}
     link_by_id = {}
@@ -436,10 +442,13 @@ def convert_ui_workflow_to_api(workflow: Dict[str, Any]) -> Dict[str, Any]:
 
 def queue_prompt(prompt: Dict[str, Any]) -> Dict[str, Any]:
     """Queue prompt to ComfyUI"""
+    payload = {"prompt": prompt}
+    payload_size = len(json.dumps(payload))
+    log(f"POST {COMFYUI_URL}/prompt (payload ~{payload_size} bytes, {len(prompt)} nodes)")
     try:
         response = requests.post(
             f"{COMFYUI_URL}/prompt",
-            json={"prompt": prompt},
+            json=payload,
             timeout=10
         )
         response.raise_for_status()
@@ -515,17 +524,9 @@ def get_video(filename: str, subfolder: str = "", folder_type: str = "output") -
         return None
 
 
-def handler(event: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Main handler function for RunPod serverless
-    Follows official worker-comfyui API format:
-    - input.workflow: Workflow JSON (API format)
-    - input.images: Optional array of input images (base64)
-    """
-    log("=== Handler called ===")
-    
+def _run_handler(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Inner handler logic; exceptions are caught by handler() and logged."""
     input_data = event.get("input", {})
-    log(f"Input keys: {list(input_data.keys())}")
 
     # Start ComfyUI if not running
     if not start_comfyui():
@@ -537,32 +538,38 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
     # Get workflow
     workflow = get_workflow_from_input(input_data)
     if not workflow:
+        log("❌ No workflow: missing input.workflow and default workflow file not found")
         return {
             "error": "No workflow provided",
             "details": "Provide workflow in input.workflow or ensure default workflow file exists"
         }
 
+    log(f"Workflow: {len(workflow)} nodes")
+    # Log model filenames so we can compare to disk (fixes value_not_in_list)
+    log("Model filenames in workflow (must match files on disk):")
+    log_workflow_models(workflow)
+    for node_id, node_data in list(workflow.items())[:5]:
+        ct = node_data.get("class_type", "unknown")
+        inputs = node_data.get("inputs", {})
+        log(f"  Node {node_id} ({ct}): {list(inputs.keys())[:5]}")
+
     # Upload input images if provided
     input_images = input_data.get("images", [])
-    image_map = upload_input_images(input_images)
+    if input_images:
+        image_map = upload_input_images(input_images)
+        log(f"Uploaded {len(image_map)} input images")
 
-    # Log workflow structure for debugging
-    log(f"Workflow structure: {len(workflow)} nodes")
-    for node_id, node_data in list(workflow.items())[:5]:  # Log first 5 nodes
-        class_type = node_data.get("class_type", "unknown")
-        inputs = node_data.get("inputs", {})
-        log(f"  Node {node_id} ({class_type}): {len(inputs)} inputs - {list(inputs.keys())[:3]}")
-    
     # Queue prompt
     try:
         result = queue_prompt(workflow)
         prompt_id = result.get("prompt_id")
         log(f"✅ Prompt queued: {prompt_id}")
     except Exception as e:
-        # Log the workflow that failed for debugging
-        log(f"❌ Failed workflow structure:")
+        log("❌ Queue prompt failed. Workflow nodes and their inputs:")
         for node_id, node_data in workflow.items():
-            log(f"  Node {node_id}: {node_data.get('class_type')} - inputs: {list(node_data.get('inputs', {}).keys())}")
+            log(f"  Node {node_id} ({node_data.get('class_type')}): {list(node_data.get('inputs', {}).keys())}")
+        log("💡 If ComfyUI returned value_not_in_list: model names above must match exact filenames in:")
+        log(f"   {NETWORK_MODELS_PATH}/text_encoders, .../diffusion_models, .../vae, .../loras")
         return {
             "error": "Failed to queue prompt",
             "details": str(e)
@@ -573,81 +580,109 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
     waited = 0
     poll_interval = 5
 
-    log(f"Waiting for completion (max {max_wait}s)...")
+    log(f"Polling for completion (interval {poll_interval}s, max {max_wait}s)...")
     while waited < max_wait:
         history = get_history(prompt_id)
+        if prompt_id not in history:
+            time.sleep(poll_interval)
+            waited += poll_interval
+            if waited % 30 == 0:
+                log(f"  Waiting for history... ({waited}s/{max_wait}s)")
+            continue
 
-        if prompt_id in history:
-            execution = history[prompt_id]
-            status = execution.get("status", {})
+        execution = history[prompt_id]
+        status = execution.get("status", {})
 
-            if status.get("completed", False):
-                # Get outputs
-                outputs = execution.get("outputs", {})
-                output_images = []
+        if status.get("completed", False):
+            outputs = execution.get("outputs", {})
+            log(f"✅ Execution completed. Output nodes: {list(outputs.keys())}")
+            output_images = []
 
-                for node_id, node_output in outputs.items():
-                    # Check for videos
-                    if "videos" in node_output:
-                        for vid in node_output["videos"]:
-                            video_data = get_video(
-                                vid["filename"],
-                                vid.get("subfolder", ""),
-                                vid.get("type", "output")
-                            )
-                            if video_data:
-                                # Convert to base64
-                                video_b64 = base64.b64encode(video_data).decode('utf-8')
-                                output_images.append({
-                                    "filename": vid["filename"],
-                                    "type": "base64",
-                                    "data": video_b64
-                                })
+            for node_id, node_output in outputs.items():
+                if "videos" in node_output:
+                    for vid in node_output["videos"]:
+                        video_data = get_video(
+                            vid["filename"],
+                            vid.get("subfolder", ""),
+                            vid.get("type", "output")
+                        )
+                        if video_data:
+                            video_b64 = base64.b64encode(video_data).decode('utf-8')
+                            output_images.append({
+                                "filename": vid["filename"],
+                                "type": "base64",
+                                "data": video_b64
+                            })
+                if "images" in node_output:
+                    for img in node_output["images"]:
+                        image_data = get_image(
+                            img["filename"],
+                            img.get("subfolder", ""),
+                            img.get("type", "output")
+                        )
+                        if image_data:
+                            image_b64 = base64.b64encode(image_data).decode('utf-8')
+                            output_images.append({
+                                "filename": img["filename"],
+                                "type": "base64",
+                                "data": image_b64
+                            })
 
-                    # Check for images
-                    if "images" in node_output:
-                        for img in node_output["images"]:
-                            image_data = get_image(
-                                img["filename"],
-                                img.get("subfolder", ""),
-                                img.get("type", "output")
-                            )
-                            if image_data:
-                                # Convert to base64
-                                image_b64 = base64.b64encode(image_data).decode('utf-8')
-                                output_images.append({
-                                    "filename": img["filename"],
-                                    "type": "base64",
-                                    "data": image_b64
-                                })
+            log(f"Returning {len(output_images)} output(s)")
+            return {
+                "id": prompt_id,
+                "status": "COMPLETED",
+                "output": {"images": output_images}
+            }
 
-                return {
-                    "id": prompt_id,
-                    "status": "COMPLETED",
-                    "output": {
-                        "images": output_images
-                    }
-                }
-
-            elif status.get("error", False):
-                error_msg = status.get("error_message", "Unknown error")
-                return {
-                    "id": prompt_id,
-                    "status": "FAILED",
-                    "error": error_msg
-                }
+        if status.get("error", False):
+            error_msg = status.get("error_message", "Unknown error")
+            log(f"❌ ComfyUI execution error: {error_msg}")
+            return {"id": prompt_id, "status": "FAILED", "error": error_msg}
 
         time.sleep(poll_interval)
         waited += poll_interval
-
         if waited % 30 == 0:
-            log(f"Still processing... ({waited}s/{max_wait}s)")
+            log(f"  Processing... ({waited}s/{max_wait}s)")
 
     return {
         "id": prompt_id,
         "status": "TIMEOUT",
         "error": f"Generation timed out after {max_wait} seconds"
     }
+
+
+def handler(event: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Main handler for RunPod serverless.
+    input.workflow / input.images / input.prompt or input.positive_prompt.
+    """
+    log("=== Handler called ===")
+    input_data = event.get("input", {})
+    log(f"Input keys: {list(input_data.keys())}")
+    if "prompt" in input_data:
+        p = input_data["prompt"]
+        log(f"  prompt: {len(p) if isinstance(p, str) else 'N/A'} chars")
+    if "positive_prompt" in input_data:
+        p = input_data["positive_prompt"]
+        log(f"  positive_prompt: {len(p) if isinstance(p, str) else 'N/A'} chars")
+    if "workflow" in input_data:
+        w = input_data["workflow"]
+        log(f"  workflow: {len(w) if isinstance(w, dict) else 0} nodes")
+    if "images" in input_data:
+        log(f"  images: {len(input_data['images'])} items")
+
+    try:
+        return _run_handler(event)
+    except Exception as e:
+        log("❌ Handler exception:")
+        log(str(e))
+        import traceback
+        log(traceback.format_exc())
+        return {
+            "error": "Handler failed",
+            "details": str(e)
+        }
 
 
 # Start RunPod serverless
