@@ -601,39 +601,35 @@ def _run_handler(event: Dict[str, Any]) -> Dict[str, Any]:
         status = execution.get("status", {})
 
         if status.get("completed", False):
-            outputs = execution.get("outputs", {})
+            outputs = execution.get("outputs", execution.get("output", {}))
+            if isinstance(outputs, list):
+                outputs = {}
             log(f"✅ Execution completed. Output nodes: {list(outputs.keys())}")
+            if not outputs:
+                log(f"   execution keys: {list(execution.keys())}")
+                for k in execution:
+                    if k not in ("prompt", "status"):
+                        v = execution[k]
+                        log(f"   {k}: {type(v).__name__} keys={list(v.keys()) if isinstance(v, dict) else 'n/a'}")
             output_images = []
 
             for node_id, node_output in outputs.items():
-                if "videos" in node_output:
-                    for vid in node_output["videos"]:
-                        video_data = get_video(
-                            vid["filename"],
-                            vid.get("subfolder", ""),
-                            vid.get("type", "output")
-                        )
-                        if video_data:
-                            video_b64 = base64.b64encode(video_data).decode('utf-8')
-                            output_images.append({
-                                "filename": vid["filename"],
-                                "type": "base64",
-                                "data": video_b64
-                            })
-                if "images" in node_output:
-                    for img in node_output["images"]:
-                        image_data = get_image(
-                            img["filename"],
-                            img.get("subfolder", ""),
-                            img.get("type", "output")
-                        )
-                        if image_data:
-                            image_b64 = base64.b64encode(image_data).decode('utf-8')
-                            output_images.append({
-                                "filename": img["filename"],
-                                "type": "base64",
-                                "data": image_b64
-                            })
+                if not isinstance(node_output, dict):
+                    continue
+                # SaveVideo/PreviewVideo serializes as "images" (PreviewVideo.as_dict())
+                for key in ("videos", "images"):
+                    for item in node_output.get(key, []):
+                        if not isinstance(item, dict):
+                            continue
+                        fn = item.get("filename")
+                        if not fn:
+                            continue
+                        subfolder = item.get("subfolder", "")
+                        folder_type = item.get("type", "output")
+                        raw = get_video(fn, subfolder, folder_type) if fn.lower().endswith((".mp4", ".webm", ".gif")) else get_image(fn, subfolder, folder_type)
+                        if raw:
+                            b64 = base64.b64encode(raw).decode("utf-8")
+                            output_images.append({"filename": fn, "type": "base64", "data": b64})
 
             log(f"Returning {len(output_images)} output(s)")
             return {
