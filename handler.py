@@ -22,6 +22,8 @@ COMFYUI_DIR = "/workspace/runpod-slim"
 COMFYUI_PORT = 8188
 COMFYUI_URL = f"http://localhost:{COMFYUI_PORT}"
 DEFAULT_WORKFLOW_FILE = "/workspace/runpod-slim/user/default/workflows/iraKim_text_to_video_wan .json"
+# Single source of truth for models (network volume)
+NETWORK_MODELS_PATH = "/workspace/iraKim_volume/models"
 
 # Global process handle
 comfyui_process = None
@@ -61,84 +63,27 @@ def start_comfyui() -> bool:
         log(f"❌ ERROR: main.py not found in {COMFYUI_DIR}")
         return False
 
-    # Setup models symlink from network volume
-    # First, check what's actually mounted in /workspace
-    log(f"📂 Checking /workspace contents:")
-    if os.path.exists("/workspace"):
-        try:
-            workspace_contents = os.listdir("/workspace")
-            log(f"   /workspace contains: {workspace_contents}")
-            
-            # Check for volume directories
-            for item in workspace_contents:
-                item_path = os.path.join("/workspace", item)
-                if os.path.isdir(item_path):
-                    log(f"   {item}/ exists")
-                    # Check if it's a volume with models
-                    if "volume" in item.lower() or "ira" in item.lower():
-                        log(f"   Checking {item_path} for models...")
-                        # Check various possible model locations
-                        for check_path in [
-                            os.path.join(item_path, "comfyui", "models"),
-                            os.path.join(item_path, "models"),
-                            item_path
-                        ]:
-                            if os.path.exists(check_path):
-                                log(f"     Found: {check_path}")
-        except Exception as e:
-            log(f"   Error listing /workspace: {e}")
-    
-    # Try to find the actual volume mount path
-    # User moved models to /workspace/models - check that first
-    network_models_paths = [
-        "/workspace/models",  # User moved models here
-        "/workspace/iraKim_volume/comfyui/models",  # Previous location
-        "/workspace/iraKim_volume/models",  # Alternative
-        "/workspace/ira_kim_volume/comfyui/models",  # Alternative naming
-        "/workspace/ira_kim_volume/models",  # Alternative
-    ]
-    
-    # Also dynamically check what's in /workspace
-    if os.path.exists("/workspace"):
-        for item in os.listdir("/workspace"):
-            item_path = os.path.join("/workspace", item)
-            if os.path.isdir(item_path):
-                # Check for models directory directly in /workspace
-                if item == "models" and item_path not in network_models_paths:
-                    network_models_paths.insert(0, item_path)  # Prefer /workspace/models
-                elif "volume" in item.lower() or "ira" in item.lower() or "kim" in item.lower():
-                    # Check for models in volume subdirectories
-                    for subpath in ["comfyui/models", "models", ""]:
-                        check_path = os.path.join(item_path, subpath) if subpath else item_path
-                        if os.path.exists(check_path) and check_path not in network_models_paths:
-                            network_models_paths.append(check_path)
-    
+    # Setup models symlink from network volume (only path we use)
     network_models = None
-    log(f"🔍 Searching for models in {len(network_models_paths)} possible paths...")
-    for vol_path in network_models_paths:
-        if os.path.exists(vol_path):
-            log(f"   Checking: {vol_path}")
-            # Verify it has model subdirectories
-            has_models = False
-            model_subdirs = []
-            for subdir in ["text_encoders", "vae", "diffusion_models", "loras"]:
-                subdir_path = os.path.join(vol_path, subdir)
-                if os.path.exists(subdir_path):
-                    has_models = True
-                    model_subdirs.append(subdir)
-            if has_models:
-                network_models = vol_path
-                log(f"📦 Network volume models found at: {network_models}")
-                log(f"   Contains subdirectories: {model_subdirs}")
-                break
-            else:
-                log(f"   Path exists but no model subdirectories found")
+    if os.path.exists(NETWORK_MODELS_PATH):
+        model_subdirs = []
+        for subdir in ["text_encoders", "vae", "diffusion_models", "loras"]:
+            if os.path.exists(os.path.join(NETWORK_MODELS_PATH, subdir)):
+                model_subdirs.append(subdir)
+        if model_subdirs:
+            network_models = NETWORK_MODELS_PATH
+            log(f"📦 Network volume models at: {network_models}")
+            log(f"   Subdirectories: {model_subdirs}")
+        else:
+            log(f"⚠️  {NETWORK_MODELS_PATH} exists but has no model subdirectories")
+    else:
+        log(f"❌ Models not found at {NETWORK_MODELS_PATH} (ensure volume is attached and models are there)")
     
     # ComfyUI expects models at: /workspace/runpod-slim/models
     comfyui_models = os.path.join(COMFYUI_DIR, "models")
     
     if network_models:
-        # Create symlink: /workspace/runpod-slim/models -> /workspace/iraKim_volume/comfyui/models
+        # Create symlink: /workspace/runpod-slim/models -> /workspace/iraKim_volume/models
         if os.path.exists(comfyui_models) and not os.path.islink(comfyui_models):
             log(f"Removing existing models directory: {comfyui_models}")
             import shutil
@@ -175,18 +120,7 @@ def start_comfyui() -> bool:
             else:
                 log(f"  ⚠️  WARNING: {subdir} directory not found at {model_path}")
     else:
-        log(f"❌ ERROR: Network volume models directory not found")
-        log(f"   Checked {len(network_models_paths)} paths:")
-        for path in network_models_paths[:10]:  # Show first 10
-            exists = "✅" if os.path.exists(path) else "❌"
-            log(f"     {exists} {path}")
-        log(f"   ComfyUI will look in: {comfyui_models} (which may be empty)")
-        log(f"   This will cause 'value_not_in_list' errors for all model loaders")
-        log(f"")
-        log(f"   💡 To fix:")
-        log(f"      1. Check RunPod endpoint settings - ensure network volume is attached")
-        log(f"      2. Verify mount path matches one of the checked paths above")
-        log(f"      3. If volume is mounted elsewhere, update handler.py network_models_paths")
+        log(f"   ComfyUI will use {comfyui_models} (empty → value_not_in_list errors until models are at {NETWORK_MODELS_PATH})")
 
     # Start ComfyUI
     log("Starting ComfyUI process...")

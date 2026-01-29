@@ -63,14 +63,14 @@
         "Node name for S&R": "CLIPLoader",
         "models": [
           {
-            "name": "umt5_xxl_fp16.safetensors",
+            "name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
             "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors?download=true",
             "directory": "text_encoders"
           }
         ]
       },
       "widgets_values": [
-        "umt5_xxl_fp16.safetensors",
+        "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
         "wan",
         "default"
       ]
@@ -279,8 +279,8 @@
         "Node name for S&R": "UNETLoader",
         "models": [
           {
-            "name": "wan2.1_t2v_1.3B_fp16.safetensors",
-            "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_1.3B_fp16.safetensors?download=true",
+            "name": "wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors",
+            "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors?download=true",
             "directory": "diffusion_models"
           }
         ]
