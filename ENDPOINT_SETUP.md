@@ -2,10 +2,10 @@
 
 ## Your Endpoint Details
 
-- **Endpoint ID**: `2o9dvi55okhect`
+- **Endpoint ID**: `11bu8yupz6eou9`
 - **API Key**: `$RUNPOD_API_KEY` (set in env or RunPod console)
 - **Name**: `Ira_kim`
-- **URL**: `https://api.runpod.ai/v2/2o9dvi55okhect/run`
+- **URL**: `https://api.runpod.ai/v2/11bu8yupz6eou9/run`
 
 ## Important: Worker Settings
 
@@ -46,7 +46,7 @@ python3 test_serverless.py
 
 ```bash
 curl -X POST \
-  "https://api.runpod.ai/v2/2o9dvi55okhect/run" \
+  "https://api.runpod.ai/v2/11bu8yupz6eou9/run" \
   -H "Authorization: Bearer $RUNPOD_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -65,7 +65,7 @@ curl -X POST \
 ```bash
 # Replace JOB_ID with ID from above response
 curl -X GET \
-  "https://api.runpod.ai/v2/2o9dvi55okhect/status/JOB_ID" \
+  "https://api.runpod.ai/v2/11bu8yupz6eou9/status/JOB_ID" \
   -H "Authorization: Bearer $RUNPOD_API_KEY"
 ```
 

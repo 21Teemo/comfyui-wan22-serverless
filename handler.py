@@ -272,9 +272,9 @@ def get_workflow_from_input(input_data: Dict[str, Any]) -> Optional[Dict[str, An
             log("Converting UI workflow format to API format...")
             api_workflow = convert_ui_workflow_to_api(workflow_data)
             
-            # Update prompt if provided in input
-            if "prompt" in input_data:
-                prompt_text = input_data["prompt"]
+            # Update prompt if provided in input (accept "prompt" or "positive_prompt")
+            prompt_text = input_data.get("prompt") or input_data.get("positive_prompt")
+            if prompt_text:
                 log(f"Updating prompt in workflow: {prompt_text[:100]}...")
                 # Find CLIPTextEncode nodes and update the first one (positive prompt)
                 for node_id, node_data in api_workflow.items():
@@ -450,22 +450,18 @@ def queue_prompt(prompt: Dict[str, Any]) -> Dict[str, Any]:
             try:
                 error_detail = e.response.json()
                 error_msg = json.dumps(error_detail, indent=2)
-                # Log full error details
                 log(f"❌ ComfyUI validation error:")
                 log(f"   {error_msg}")
-                # Try to extract node errors if present
-                if isinstance(error_detail, dict):
-                    if "error" in error_detail:
-                        error_info = error_detail["error"]
-                        if isinstance(error_info, dict) and "node_errors" in error_info:
-                            log(f"   Node errors:")
-                            for node_id, node_error in error_info["node_errors"].items():
-                                log(f"     Node {node_id}: {node_error}")
-            except:
-                error_msg = e.response.text[:2000]
+                if isinstance(error_detail, dict) and "error" in error_detail:
+                    err = error_detail["error"]
+                    if isinstance(err, dict) and "node_errors" in err:
+                        for node_id, node_error in err["node_errors"].items():
+                            log(f"     Node {node_id}: {node_error}")
+            except Exception:
+                error_msg = (e.response.text or str(e))[:2000]
                 log(f"❌ ComfyUI error response: {error_msg}")
         log(f"❌ Error queueing prompt: {error_msg}")
-        raise
+        raise ValueError(error_msg) from e
     except Exception as e:
         log(f"❌ Error queueing prompt: {e}")
         import traceback
