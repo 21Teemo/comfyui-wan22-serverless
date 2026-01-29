@@ -1,0 +1,11 @@
+{
+    "Comfy.InstalledVersion": "1.36.14",
+    "Comfy.TutorialCompleted": true,
+    "Comfy.VueNodes.Enabled": true,
+    "Comfy.Minimap.Visible": false,
+    "Comfy.Templates.SelectedModels": [
+        "Wan2.1"
+    ],
+    "Comfy.LinkRenderMode": 2,
+    "Comfy.DevMode": true
+}

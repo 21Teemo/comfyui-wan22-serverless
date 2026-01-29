@@ -1,0 +1,69 @@
+# Serverless deployment .gitignore
+# Use this for your GitHub repo (rename to .gitignore)
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Models (should be on network volume, not in repo)
+models/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+
+# Outputs
+output/
+*.mp4
+*.avi
+*.mov
+*.png
+*.jpg
+*.jpeg
+*.webp
+
+# Logs
+*.log
+logs/
+build.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Environment variables
+.env
+.env.local
+
+# Docker
+.docker/
+
+# Test files (optional - you might want to keep these)
+# test_*.py
+# *_test.py
+
+# ComfyUI full codebase (we clone it in Dockerfile)
+# Don't include the full ComfyUI repo, just our custom files

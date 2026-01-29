@@ -2,6 +2,9 @@ import torch
 import logging
 
 try:
+    # Check if torch.library.custom_op exists (requires PyTorch 2.4+)
+    if not hasattr(torch.library, 'custom_op'):
+        raise ImportError("PyTorch version too old for comfy_kitchen")
     import comfy_kitchen as ck
     from comfy_kitchen.tensor import (
         QuantizedTensor,

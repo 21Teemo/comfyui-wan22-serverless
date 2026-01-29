@@ -25,7 +25,7 @@ import comfy.rmsnorm
 import json
 
 def run_every_op():
-    if torch.compiler.is_compiling():
+    if hasattr(torch.compiler, 'is_compiling') and torch.compiler.is_compiling():
         return
 
     comfy.model_management.throw_exception_if_processing_interrupted()
@@ -573,6 +573,13 @@ def mixed_precision_ops(quant_config={}, compute_dtype=torch.bfloat16, full_prec
                     self.layout_type = qconfig["comfy_tensor_layout"]
                     layout_cls = get_layout_class(self.layout_type)
 
+                    # Fallback if comfy_kitchen is not available (layout_cls will be None)
+                    if layout_cls is None:
+                        # Skip quantization and load as regular FP16 weights
+                        logging.warning(f"comfy_kitchen not available, loading {self.quant_format} weights as FP16 (no quantization)")
+                        self.weight = torch.nn.Parameter(weight.to(device=device, dtype=MixedPrecisionOps._compute_dtype), requires_grad=False)
+                        return
+
                     # Load format-specific parameters
                     if self.quant_format in ["float8_e4m3fn", "float8_e5m2"]:
                         # FP8: single tensor scale
@@ -586,6 +593,12 @@ def mixed_precision_ops(quant_config={}, compute_dtype=torch.bfloat16, full_prec
 
                     elif self.quant_format == "nvfp4":
                         # NVFP4: tensor_scale (weight_scale_2) + block_scale (weight_scale)
+                        if layout_cls is None:
+                            # Fallback if comfy_kitchen is not available
+                            logging.warning(f"comfy_kitchen not available, loading {self.quant_format} weights as FP16 (no quantization)")
+                            self.weight = torch.nn.Parameter(weight.to(device=device, dtype=MixedPrecisionOps._compute_dtype), requires_grad=False)
+                            return
+                        
                         tensor_scale = self._load_scale_param(state_dict, prefix, "weight_scale_2", device, manually_loaded_keys)
                         block_scale = self._load_scale_param(state_dict, prefix, "weight_scale", device, manually_loaded_keys,
                                                              dtype=torch.float8_e4m3fn)
