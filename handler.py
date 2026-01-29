@@ -280,17 +280,24 @@ def get_workflow_from_input(input_data: Dict[str, Any]) -> Optional[Dict[str, An
         if has_nodes:
             log("Converting UI workflow -> API format...")
             api_workflow = convert_ui_workflow_to_api(workflow_data)
-            prompt_text = input_data.get("prompt") or input_data.get("positive_prompt")
-            if prompt_text:
-                log(f"  Injecting prompt ({len(prompt_text)} chars) into CLIPTextEncode...")
-                for node_id, node_data in api_workflow.items():
-                    if node_data.get("class_type") == "CLIPTextEncode":
-                        if "text" in node_data.get("inputs", {}):
-                            api_workflow[node_id]["inputs"]["text"] = prompt_text
-                            log(f"  Updated node {node_id}")
-                            break
-            else:
-                log("  No prompt/positive_prompt in input; using workflow text as-is")
+            positive = input_data.get("prompt") or input_data.get("positive_prompt")
+            negative = input_data.get("negative_prompt")
+            clip_nodes = [
+                (nid, nd) for nid, nd in api_workflow.items()
+                if nd.get("class_type") == "CLIPTextEncode" and "text" in (nd.get("inputs") or {})
+            ]
+            if positive:
+                log(f"  Injecting positive prompt ({len(positive)} chars)")
+                if clip_nodes:
+                    nid, _ = clip_nodes[0]
+                    api_workflow[nid]["inputs"]["text"] = positive
+                    log(f"  Updated CLIPTextEncode (positive) node {nid}")
+            if negative and len(clip_nodes) >= 2:
+                nid, _ = clip_nodes[1]
+                api_workflow[nid]["inputs"]["text"] = negative
+                log(f"  Injecting negative prompt ({len(negative)} chars) into node {nid}")
+            if not positive and not negative:
+                log("  No prompt/positive_prompt/negative_prompt in input; using workflow text as-is")
             return api_workflow
         return workflow_data
     except Exception as e:
