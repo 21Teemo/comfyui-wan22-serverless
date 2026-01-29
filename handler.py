@@ -89,8 +89,10 @@ def start_comfyui() -> bool:
             log(f"   Error listing /workspace: {e}")
     
     # Try to find the actual volume mount path
+    # User moved models to /workspace/models - check that first
     network_models_paths = [
-        "/workspace/iraKim_volume/comfyui/models",  # Expected location
+        "/workspace/models",  # User moved models here
+        "/workspace/iraKim_volume/comfyui/models",  # Previous location
         "/workspace/iraKim_volume/models",  # Alternative
         "/workspace/ira_kim_volume/comfyui/models",  # Alternative naming
         "/workspace/ira_kim_volume/models",  # Alternative
@@ -100,12 +102,16 @@ def start_comfyui() -> bool:
     if os.path.exists("/workspace"):
         for item in os.listdir("/workspace"):
             item_path = os.path.join("/workspace", item)
-            if os.path.isdir(item_path) and ("volume" in item.lower() or "ira" in item.lower() or "kim" in item.lower()):
-                # Check for models in various subdirectories
-                for subpath in ["comfyui/models", "models", ""]:
-                    check_path = os.path.join(item_path, subpath) if subpath else item_path
-                    if os.path.exists(check_path) and check_path not in network_models_paths:
-                        network_models_paths.append(check_path)
+            if os.path.isdir(item_path):
+                # Check for models directory directly in /workspace
+                if item == "models" and item_path not in network_models_paths:
+                    network_models_paths.insert(0, item_path)  # Prefer /workspace/models
+                elif "volume" in item.lower() or "ira" in item.lower() or "kim" in item.lower():
+                    # Check for models in volume subdirectories
+                    for subpath in ["comfyui/models", "models", ""]:
+                        check_path = os.path.join(item_path, subpath) if subpath else item_path
+                        if os.path.exists(check_path) and check_path not in network_models_paths:
+                            network_models_paths.append(check_path)
     
     network_models = None
     log(f"🔍 Searching for models in {len(network_models_paths)} possible paths...")
