@@ -298,6 +298,8 @@ def get_workflow_from_input(input_data: Dict[str, Any]) -> Optional[Dict[str, An
                 log(f"  Injecting negative prompt ({len(negative)} chars) into node {nid}")
             if not positive and not negative:
                 log("  No prompt/positive_prompt/negative_prompt in input; using workflow text as-is")
+            # Apply seed/steps/cfg/width/height/length from input so API actually controls quality
+            _apply_input_overrides(api_workflow, input_data)
             return api_workflow
         return workflow_data
     except Exception as e:
@@ -305,6 +307,41 @@ def get_workflow_from_input(input_data: Dict[str, Any]) -> Optional[Dict[str, An
         import traceback
         log(traceback.format_exc())
         return None
+
+
+def _apply_input_overrides(api_workflow: Dict[str, Any], input_data: Dict[str, Any]) -> None:
+    """Override seed, steps, cfg, width, height, length from request input for quality control."""
+    if not input_data:
+        return
+    seed = input_data.get("seed")
+    steps = input_data.get("steps")
+    cfg = input_data.get("cfg")
+    width = input_data.get("width")
+    height = input_data.get("height")
+    length = input_data.get("length")
+    for node_id, node in api_workflow.items():
+        ct = node.get("class_type", "")
+        inputs = node.get("inputs") or {}
+        if ct == "KSampler":
+            if seed is not None:
+                inputs["seed"] = int(seed)
+                log(f"  Override KSampler {node_id}: seed={seed}")
+            if steps is not None:
+                inputs["steps"] = int(steps)
+                log(f"  Override KSampler {node_id}: steps={steps}")
+            if cfg is not None:
+                inputs["cfg"] = float(cfg)
+                log(f"  Override KSampler {node_id}: cfg={cfg}")
+        if ct == "EmptyHunyuanLatentVideo":
+            if width is not None:
+                inputs["width"] = int(width)
+                log(f"  Override EmptyHunyuanLatentVideo {node_id}: width={width}")
+            if height is not None:
+                inputs["height"] = int(height)
+                log(f"  Override EmptyHunyuanLatentVideo {node_id}: height={height}")
+            if length is not None:
+                inputs["length"] = int(length)
+                log(f"  Override EmptyHunyuanLatentVideo {node_id}: length={length}")
 
 
 def convert_ui_workflow_to_api(workflow: Dict[str, Any]) -> Dict[str, Any]:
@@ -379,12 +416,12 @@ def convert_ui_workflow_to_api(workflow: Dict[str, Any]) -> Dict[str, Any]:
                     
                     # Handle special widget types and conversions
                     if isinstance(value, str) and value == "randomize":
-                        # For seed, use random; for steps, cap at 10000
+                        import random
                         if input_name == "seed":
-                            import random
                             value = random.randint(0, 2**32 - 1)
                         elif input_name == "steps":
-                            value = 20  # Default steps
+                            value = 30  # Sensible default; overridden by input_data if provided
+                        # else leave value as-is (other widgets shouldn't have "randomize")
                     
                     # Fix KSampler widget values
                     if node.get("type") == "KSampler":
