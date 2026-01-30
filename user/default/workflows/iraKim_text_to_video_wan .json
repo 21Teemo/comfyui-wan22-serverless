@@ -523,7 +523,7 @@
         { "localized_name": "MODEL", "name": "MODEL", "type": "MODEL", "slot_index": 0, "links": [115] }
       ],
       "properties": { "Node name for S&R": "LoraLoader" },
-      "widgets_values": ["wavespeed-ai_wan-2.2-image-lora-trainer high_noise_lora_iraKim.safetensors", 0.9, 1.0]
+      "widgets_values": ["wavespeed-ai_wan-2.2-image-lora-trainer_low_noise_lora_iraKim.safetensors", 0.9, 1.0]
     },
     {
       "id": 54,
@@ -767,7 +767,7 @@
         "Node name for S&R": "LoraLoader"
       },
       "widgets_values": [
-        "wavespeed-ai_wan-2.2-image-lora-trainer high_noise_lora_iraKim.safetensors",
+        "wavespeed-ai_wan-2.2-image-lora-trainer_low_noise_lora_iraKim.safetensors",
         0.9,
         1.0
       ],

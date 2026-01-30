@@ -282,16 +282,16 @@ def get_workflow_from_input(input_data: Dict[str, Any]) -> Optional[Dict[str, An
             api_workflow = convert_ui_workflow_to_api(workflow_data)
             positive = input_data.get("prompt") or input_data.get("positive_prompt")
             negative = input_data.get("negative_prompt")
-            clip_nodes = [
-                (nid, nd) for nid, nd in api_workflow.items()
-                if nd.get("class_type") == "CLIPTextEncode" and "text" in (nd.get("inputs") or {})
-            ]
-            if positive:
-                log(f"  Injecting positive prompt ({len(positive)} chars)")
-                if clip_nodes:
-                    nid, _ = clip_nodes[0]
-                    api_workflow[nid]["inputs"]["text"] = positive
-                    log(f"  Updated CLIPTextEncode (positive) node {nid}")
+            clip_nodes = sorted(
+                [(nid, nd) for nid, nd in api_workflow.items()
+                 if nd.get("class_type") == "CLIPTextEncode" and "text" in (nd.get("inputs") or {})],
+                key=lambda x: int(x[0]),
+            )
+            # Node 6 = positive, node 7 = negative (by workflow convention; order by id)
+            if positive and clip_nodes:
+                nid, _ = clip_nodes[0]
+                api_workflow[nid]["inputs"]["text"] = positive
+                log(f"  Injecting positive prompt ({len(positive)} chars) into node {nid}")
             if negative and len(clip_nodes) >= 2:
                 nid, _ = clip_nodes[1]
                 api_workflow[nid]["inputs"]["text"] = negative
