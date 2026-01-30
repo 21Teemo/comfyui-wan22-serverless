@@ -1,8 +1,8 @@
 {
   "id": "21720dda-bf84-4f0a-8469-a681c80e302e",
   "revision": 0,
-  "last_node_id": 55,
-  "last_link_id": 112,
+  "last_node_id": 56,
+  "last_link_id": 115,
   "nodes": [
     {
       "id": 38,
@@ -478,7 +478,7 @@
         { "localized_name": "weight_dtype", "name": "weight_dtype", "type": "COMBO", "widget": { "name": "weight_dtype" }, "link": null }
       ],
       "outputs": [
-        { "localized_name": "MODEL", "name": "MODEL", "type": "MODEL", "slot_index": 0, "links": [103] }
+        { "localized_name": "MODEL", "name": "MODEL", "type": "MODEL", "slot_index": 0, "links": [113] }
       ],
       "properties": {
         "Node name for S&R": "UNETLoader",
@@ -495,7 +495,7 @@
       "order": 9,
       "mode": 0,
       "inputs": [
-        { "localized_name": "model", "name": "model", "type": "MODEL", "link": 103 },
+        { "localized_name": "model", "name": "model", "type": "MODEL", "link": 115 },
         { "localized_name": "shift", "name": "shift", "type": "FLOAT", "widget": { "name": "shift" }, "link": null }
       ],
       "outputs": [
@@ -503,6 +503,27 @@
       ],
       "properties": { "Node name for S&R": "ModelSamplingSD3" },
       "widgets_values": [8]
+    },
+    {
+      "id": 56,
+      "type": "LoraLoader",
+      "pos": [-139, -260],
+      "size": [270, 170.65625],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        { "localized_name": "model", "name": "model", "type": "MODEL", "link": 113 },
+        { "localized_name": "clip", "name": "clip", "type": "CLIP", "link": 114 },
+        { "localized_name": "lora_name", "name": "lora_name", "type": "COMBO", "widget": { "name": "lora_name" }, "link": null },
+        { "localized_name": "strength_model", "name": "strength_model", "type": "FLOAT", "widget": { "name": "strength_model" }, "link": null },
+        { "localized_name": "strength_clip", "name": "strength_clip", "type": "FLOAT", "widget": { "name": "strength_clip" }, "link": null }
+      ],
+      "outputs": [
+        { "localized_name": "MODEL", "name": "MODEL", "type": "MODEL", "slot_index": 0, "links": [115] }
+      ],
+      "properties": { "Node name for S&R": "LoraLoader" },
+      "widgets_values": ["wavespeed-ai_wan-2.2-image-lora-trainer high_noise_lora_iraKim.safetensors", 0.9, 1.0]
     },
     {
       "id": 54,
@@ -747,8 +768,8 @@
       },
       "widgets_values": [
         "wavespeed-ai_wan-2.2-image-lora-trainer high_noise_lora_iraKim.safetensors",
-        1,
-        1
+        0.9,
+        1.0
       ],
       "color": "#223",
       "bgcolor": "#335"
@@ -764,7 +785,9 @@
     [99, 38, 0, 51, 1, "CLIP"],
     [100, 51, 1, 6, 0, "CLIP"],
     [101, 51, 1, 7, 0, "CLIP"],
-    [103, 52, 0, 53, 0, "MODEL"],
+    [113, 52, 0, 56, 0, "MODEL"],
+    [114, 38, 0, 56, 1, "CLIP"],
+    [115, 56, 0, 53, 0, "MODEL"],
     [104, 53, 0, 55, 0, "MODEL"],
     [105, 51, 0, 54, 0, "MODEL"],
     [106, 40, 0, 54, 9, "LATENT"],

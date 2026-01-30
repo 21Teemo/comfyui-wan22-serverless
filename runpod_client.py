@@ -50,7 +50,7 @@ DEFAULT_HEIGHT = 720
 DEFAULT_LENGTH = 33
 
 # Default prompts when run with no args (edit these or pass via CLI)
-DEFAULT_POSITIVE_PROMPT = "iraKim, 1girl, smiling at camera, golden hour lighting, soft focus"
+DEFAULT_POSITIVE_PROMPT = "iraKim, portrait of iraKim, face close-up, looking at camera, sharp focus, 1girl, golden hour lighting"
 DEFAULT_NEGATIVE_PROMPT = "blurry, distorted, deformed, bad anatomy, bad quality"
 
 
@@ -177,11 +177,8 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="Print only JSON result")
     args = parser.parse_args()
 
-    prompt = args.prompt or args.prompt_opt
-    if not prompt:
-        parser.print_help()
-        print("\nExample: python runpod_client.py \"1girl, smiling at camera, golden hour\"")
-        return 0
+    prompt = args.prompt or args.prompt_opt or DEFAULT_POSITIVE_PROMPT
+    negative = args.negative if args.negative is not None else DEFAULT_NEGATIVE_PROMPT
 
     if not API_KEY:
         print("Error: RUNPOD_API_KEY not set. Use .env or environment.", file=sys.stderr)
@@ -189,7 +186,7 @@ def main() -> int:
 
     result = run_prompt(
         prompt=prompt,
-        negative_prompt=args.negative,
+        negative_prompt=negative,
         seed=args.seed,
         steps=args.steps,
         cfg=args.cfg,
