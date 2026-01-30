@@ -323,8 +323,9 @@ def _apply_input_overrides(api_workflow: Dict[str, Any], input_data: Dict[str, A
     kadv_nodes = [(nid, nd.get("inputs") or {}) for nid, nd in api_workflow.items() if nd.get("class_type") == "KSamplerAdvanced"]
     kadv_first = next((nid for nid, inp in kadv_nodes if inp.get("start_at_step") == 0), None)
     kadv_second = next((nid for nid, inp in kadv_nodes if inp.get("start_at_step", -1) > 0), None)
-    total_steps = steps if steps is not None else 20
-    mid = max(1, total_steps // 2)
+    # WAN 2.2: give low-noise more steps (1/3 high, 2/3 low) for sharpness
+    total_steps = steps if steps is not None else 30
+    mid = max(1, total_steps // 3)
     # Use one seed for both KSamplerAdvanced when not provided
     if seed is None and kadv_first is not None:
         import random
@@ -446,7 +447,7 @@ def convert_ui_workflow_to_api(workflow: Dict[str, Any]) -> Dict[str, Any]:
                         if input_name in ("seed", "noise_seed"):
                             value = random.randint(0, 2**32 - 1)
                         elif input_name == "steps":
-                            value = 20  # WAN 2.2 default; overridden by input_data if provided
+                            value = 30  # WAN 2.2 default; overridden by input_data if provided
                         # else leave value as-is (other widgets shouldn't have "randomize")
                     
                     # Fix KSampler widget values

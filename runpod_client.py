@@ -43,10 +43,10 @@ ENDPOINT_ID = os.environ.get("RUNPOD_ENDPOINT_ID", "j1i0671zabhwmp")
 RUNPOD_API = f"https://api.runpod.ai/v2/{ENDPOINT_ID}" if ENDPOINT_ID else None
 
 DEFAULT_OUTPUT_DIR = "runpod_output"
-DEFAULT_STEPS = 20
-DEFAULT_CFG = 1.2
-DEFAULT_WIDTH = 832
-DEFAULT_HEIGHT = 480
+DEFAULT_STEPS = 30
+DEFAULT_CFG = 1.0
+DEFAULT_WIDTH = 1280
+DEFAULT_HEIGHT = 720
 DEFAULT_LENGTH = 33
 
 # Default prompts when run with no args (edit these or pass via CLI)

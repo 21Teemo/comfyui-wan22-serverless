@@ -357,8 +357,8 @@
         "Node name for S&R": "EmptyHunyuanLatentVideo"
       },
       "widgets_values": [
-        832,
-        480,
+        1280,
+        720,
         33,
         1
       ]
@@ -531,7 +531,7 @@
         { "localized_name": "LATENT", "name": "LATENT", "type": "LATENT", "slot_index": 0, "links": [107] }
       ],
       "properties": { "Node name for S&R": "KSamplerAdvanced" },
-      "widgets_values": ["enable", "randomize", 20, 1.2, "euler", "simple", 0, 10, "enable"]
+      "widgets_values": ["enable", "randomize", 30, 1.0, "dpmpp_2m", "simple", 0, 10, "enable"]
     },
     {
       "id": 55,
@@ -560,7 +560,7 @@
         { "localized_name": "LATENT", "name": "LATENT", "type": "LATENT", "slot_index": 0, "links": [35] }
       ],
       "properties": { "Node name for S&R": "KSamplerAdvanced" },
-      "widgets_values": ["disable", 0, 20, 1.2, "euler", "simple", 10, 20, "disable"]
+      "widgets_values": ["disable", 0, 30, 1.0, "dpmpp_2m", "simple", 10, 30, "disable"]
     },
     {
       "id": 50,
