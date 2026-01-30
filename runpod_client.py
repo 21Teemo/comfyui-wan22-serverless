@@ -43,11 +43,15 @@ ENDPOINT_ID = os.environ.get("RUNPOD_ENDPOINT_ID", "j1i0671zabhwmp")
 RUNPOD_API = f"https://api.runpod.ai/v2/{ENDPOINT_ID}" if ENDPOINT_ID else None
 
 DEFAULT_OUTPUT_DIR = "runpod_output"
-DEFAULT_STEPS = 50
-DEFAULT_CFG = 6.0
+DEFAULT_STEPS = 20
+DEFAULT_CFG = 1.2
 DEFAULT_WIDTH = 832
 DEFAULT_HEIGHT = 480
 DEFAULT_LENGTH = 33
+
+# Default prompts when run with no args (edit these or pass via CLI)
+DEFAULT_POSITIVE_PROMPT = "iraKim, 1girl, smiling at camera, golden hour lighting, soft focus"
+DEFAULT_NEGATIVE_PROMPT = "blurry, distorted, deformed, bad anatomy, bad quality"
 
 
 def run_prompt(
@@ -175,7 +179,9 @@ def main() -> int:
 
     prompt = args.prompt or args.prompt_opt
     if not prompt:
-        parser.error("Provide a prompt as positional argument or --prompt")
+        parser.print_help()
+        print("\nExample: python runpod_client.py \"1girl, smiling at camera, golden hour\"")
+        return 0
 
     if not API_KEY:
         print("Error: RUNPOD_API_KEY not set. Use .env or environment.", file=sys.stderr)

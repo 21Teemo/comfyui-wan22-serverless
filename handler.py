@@ -319,6 +319,17 @@ def _apply_input_overrides(api_workflow: Dict[str, Any], input_data: Dict[str, A
     width = input_data.get("width")
     height = input_data.get("height")
     length = input_data.get("length")
+    # WAN 2.2 two-stage: find KSamplerAdvanced nodes by start_at_step (first=0, second=mid)
+    kadv_nodes = [(nid, nd.get("inputs") or {}) for nid, nd in api_workflow.items() if nd.get("class_type") == "KSamplerAdvanced"]
+    kadv_first = next((nid for nid, inp in kadv_nodes if inp.get("start_at_step") == 0), None)
+    kadv_second = next((nid for nid, inp in kadv_nodes if inp.get("start_at_step", -1) > 0), None)
+    total_steps = steps if steps is not None else 20
+    mid = max(1, total_steps // 2)
+    # Use one seed for both KSamplerAdvanced when not provided
+    if seed is None and kadv_first is not None:
+        import random
+        seed = random.randint(0, 2**32 - 1)
+        log(f"  Generated seed for two-stage: {seed}")
     for node_id, node in api_workflow.items():
         ct = node.get("class_type", "")
         inputs = node.get("inputs") or {}
@@ -332,6 +343,21 @@ def _apply_input_overrides(api_workflow: Dict[str, Any], input_data: Dict[str, A
             if cfg is not None:
                 inputs["cfg"] = float(cfg)
                 log(f"  Override KSampler {node_id}: cfg={cfg}")
+        if ct == "KSamplerAdvanced":
+            if seed is not None:
+                inputs["noise_seed"] = int(seed)
+            if steps is not None:
+                inputs["steps"] = int(steps)
+            if cfg is not None:
+                inputs["cfg"] = float(cfg)
+            if node_id == kadv_first:
+                inputs["start_at_step"] = 0
+                inputs["end_at_step"] = mid
+                log(f"  Override KSamplerAdvanced {node_id} (high-noise): steps={steps}, cfg={cfg}, 0-{mid}")
+            elif node_id == kadv_second:
+                inputs["start_at_step"] = mid
+                inputs["end_at_step"] = total_steps
+                log(f"  Override KSamplerAdvanced {node_id} (low-noise): steps={steps}, cfg={cfg}, {mid}-{total_steps}")
         if ct == "EmptyHunyuanLatentVideo":
             if width is not None:
                 inputs["width"] = int(width)
@@ -417,10 +443,10 @@ def convert_ui_workflow_to_api(workflow: Dict[str, Any]) -> Dict[str, Any]:
                     # Handle special widget types and conversions
                     if isinstance(value, str) and value == "randomize":
                         import random
-                        if input_name == "seed":
+                        if input_name in ("seed", "noise_seed"):
                             value = random.randint(0, 2**32 - 1)
                         elif input_name == "steps":
-                            value = 30  # Sensible default; overridden by input_data if provided
+                            value = 20  # WAN 2.2 default; overridden by input_data if provided
                         # else leave value as-is (other widgets shouldn't have "randomize")
                     
                     # Fix KSampler widget values
