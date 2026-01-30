@@ -13,6 +13,8 @@ import time
 from typing import Any, Dict, List, Optional
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 
 def _load_dotenv() -> Optional[str]:
@@ -43,14 +45,14 @@ ENDPOINT_ID = os.environ.get("RUNPOD_ENDPOINT_ID", "j1i0671zabhwmp")
 RUNPOD_API = f"https://api.runpod.ai/v2/{ENDPOINT_ID}" if ENDPOINT_ID else None
 
 DEFAULT_OUTPUT_DIR = "runpod_output"
-DEFAULT_STEPS = 30
+DEFAULT_STEPS = 36
 DEFAULT_CFG = 1.0
 DEFAULT_WIDTH = 1280
 DEFAULT_HEIGHT = 720
 DEFAULT_LENGTH = 33
 
 # Default prompts when run with no args (edit these or pass via CLI)
-DEFAULT_POSITIVE_PROMPT = "iraKim, portrait of iraKim, face close-up, looking at camera, sharp focus, 1girl, golden hour lighting"
+DEFAULT_POSITIVE_PROMPT = "iraKim, close-up portrait photo, looking at camera, sharp eyes, natural skin texture, realistic face, high detail, golden hour lighting, shallow depth of field, 85mm lens, clean background"
 DEFAULT_NEGATIVE_PROMPT = "blurry, distorted, deformed, bad anatomy, bad quality"
 
 
@@ -93,12 +95,16 @@ def run_prompt(
     if seed is not None:
         payload["input"]["seed"] = seed
 
+    session = requests.Session()
+    retries = Retry(total=5, backoff_factor=2, status_forcelist=[502, 503, 504])
+    session.mount("https://", HTTPAdapter(max_retries=retries))
+
     try:
-        r = requests.post(
+        r = session.post(
             f"{RUNPOD_API}/run",
             headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"},
             json=payload,
-            timeout=30,
+            timeout=60,
         )
         r.raise_for_status()
         result = r.json()
@@ -110,19 +116,27 @@ def run_prompt(
         return {"status": "FAILED", "error": "No job id in response", "response": result}
 
     waited = 0
+    status_get_retries = 5
     while waited < max_wait:
         time.sleep(poll_interval)
         waited += poll_interval
-        try:
-            status_r = requests.get(
-                f"{RUNPOD_API}/status/{job_id}",
-                headers={"Authorization": f"Bearer {API_KEY}"},
-                timeout=10,
-            )
-            status_r.raise_for_status()
-            status_data = status_r.json()
-        except requests.exceptions.RequestException as e:
-            return {"status": "FAILED", "job_id": job_id, "error": str(e)}
+        for attempt in range(status_get_retries):
+            try:
+                status_r = session.get(
+                    f"{RUNPOD_API}/status/{job_id}",
+                    headers={"Authorization": f"Bearer {API_KEY}"},
+                    timeout=60,
+                )
+                status_r.raise_for_status()
+                status_data = status_r.json()
+                break
+            except (requests.exceptions.ConnectionError, OSError) as e:
+                if attempt < status_get_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+                return {"status": "FAILED", "job_id": job_id, "error": str(e)}
+            except requests.exceptions.RequestException as e:
+                return {"status": "FAILED", "job_id": job_id, "error": str(e)}
 
         job_status = status_data.get("status", "UNKNOWN")
         if job_status == "COMPLETED":

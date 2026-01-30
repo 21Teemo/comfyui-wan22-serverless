@@ -323,9 +323,9 @@ def _apply_input_overrides(api_workflow: Dict[str, Any], input_data: Dict[str, A
     kadv_nodes = [(nid, nd.get("inputs") or {}) for nid, nd in api_workflow.items() if nd.get("class_type") == "KSamplerAdvanced"]
     kadv_first = next((nid for nid, inp in kadv_nodes if inp.get("start_at_step") == 0), None)
     kadv_second = next((nid for nid, inp in kadv_nodes if inp.get("start_at_step", -1) > 0), None)
-    # WAN 2.2: give low-noise more steps (1/3 high, 2/3 low) for sharpness
-    total_steps = steps if steps is not None else 30
-    mid = max(1, total_steps // 3)
+    # WAN 2.2: high-noise fixed at 10 steps, rest for low-noise (max identity fidelity)
+    total_steps = steps if steps is not None else 36
+    mid = 10
     # Use one seed for both KSamplerAdvanced when not provided
     if seed is None and kadv_first is not None:
         import random
@@ -349,16 +349,16 @@ def _apply_input_overrides(api_workflow: Dict[str, Any], input_data: Dict[str, A
                 inputs["noise_seed"] = int(seed)
             if steps is not None:
                 inputs["steps"] = int(steps)
-            if cfg is not None:
-                inputs["cfg"] = float(cfg)
             if node_id == kadv_first:
                 inputs["start_at_step"] = 0
                 inputs["end_at_step"] = mid
-                log(f"  Override KSamplerAdvanced {node_id} (high-noise): steps={steps}, cfg={cfg}, 0-{mid}")
+                inputs["cfg"] = 1.0  # fixed; client cfg ignored for stability
+                log(f"  Override KSamplerAdvanced {node_id} (high-noise): steps={total_steps}, cfg=1.0, 0-{mid}")
             elif node_id == kadv_second:
                 inputs["start_at_step"] = mid
                 inputs["end_at_step"] = total_steps
-                log(f"  Override KSamplerAdvanced {node_id} (low-noise): steps={steps}, cfg={cfg}, {mid}-{total_steps}")
+                inputs["cfg"] = 1.15  # fixed; client cfg ignored for stability
+                log(f"  Override KSamplerAdvanced {node_id} (low-noise): steps={total_steps}, cfg=1.15, {mid}-{total_steps}")
         if ct == "EmptyHunyuanLatentVideo":
             if width is not None:
                 inputs["width"] = int(width)
@@ -447,7 +447,7 @@ def convert_ui_workflow_to_api(workflow: Dict[str, Any]) -> Dict[str, Any]:
                         if input_name in ("seed", "noise_seed"):
                             value = random.randint(0, 2**32 - 1)
                         elif input_name == "steps":
-                            value = 30  # WAN 2.2 default; overridden by input_data if provided
+                            value = 36  # WAN 2.2 default; overridden by input_data if provided
                         # else leave value as-is (other widgets shouldn't have "randomize")
                     
                     # Fix KSampler widget values
@@ -509,6 +509,21 @@ def convert_ui_workflow_to_api(workflow: Dict[str, Any]) -> Dict[str, Any]:
             log(f"    ⚠️  WARNING: Node {node_id} has no inputs!")
     
     return api_prompt
+
+
+def _log_final_prompt_verification(prompt: Dict[str, Any]) -> None:
+    """Log key node values before queueing so serverless logs can verify no silent overrides."""
+    log("  Final prompt verification (before queue):")
+    for nid in ("51", "56"):
+        nd = prompt.get(nid, {})
+        if nd.get("class_type") == "LoraLoader":
+            inp = nd.get("inputs") or {}
+            log(f"  📎 Node {nid} (LoraLoader): strength_model={inp.get('strength_model')}, strength_clip={inp.get('strength_clip')}")
+    for nid in ("54", "55"):
+        nd = prompt.get(nid, {})
+        if nd.get("class_type") == "KSamplerAdvanced":
+            inp = nd.get("inputs") or {}
+            log(f"  📎 Node {nid} (KSamplerAdvanced): cfg={inp.get('cfg')}, steps={inp.get('steps')}, start={inp.get('start_at_step')}, end={inp.get('end_at_step')}")
 
 
 def queue_prompt(prompt: Dict[str, Any]) -> Dict[str, Any]:
@@ -632,6 +647,7 @@ def _run_handler(event: Dict[str, Any]) -> Dict[str, Any]:
 
     # Queue prompt
     try:
+        _log_final_prompt_verification(workflow)
         result = queue_prompt(workflow)
         prompt_id = result.get("prompt_id")
         log(f"✅ Prompt queued: {prompt_id}")
